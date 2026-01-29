@@ -39,40 +39,10 @@ export async function POST(req: Request) {
         });
         break;
       }
-      case "organization.created":
-      case "organization.updated": {
-        const o = evt.data;
-        await supabase.rpc("upsert_org", {
-          p_clerk_org_id: o.id,
-          p_name: o.name ?? "Org",
-        });
-        break;
-      }
-      case "organizationMembership.created":
-      case "organizationMembership.updated": {
-        const m = evt.data;
-        const role =
-          (m.public_metadata as any)?.role ??
-          (m.role as string) ??
-          "employee";
-        await supabase.rpc("upsert_org_membership", {
-          p_clerk_user_id: m.public_user_data.user_id,
-          p_clerk_org_id: m.organization.id,
-          p_role: role,
-        });
-        break;
-      }
-      case "organizationMembership.deleted": {
-        const m = evt.data;
-        await supabase.rpc("delete_org_membership", {
-          p_clerk_user_id: m.public_user_data.user_id,
-          p_clerk_org_id: m.organization.id,
-        });
-        break;
-      }
     }
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
