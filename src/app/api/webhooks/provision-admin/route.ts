@@ -57,12 +57,26 @@ export async function POST(req: Request) {
   const clerk = await clerkClient();
 
   try {
-    // 1. Create corporation in Supabase
+    // 1. Look up organization in Supabase by slug
+    const { data: org, error: orgError } = await supabase
+      .from("organizations")
+      .select("id")
+      .eq("slug", org_slug)
+      .single();
+
+    if (orgError || !org) {
+      return NextResponse.json(
+        { ok: false, error: `Organization with slug '${org_slug}' not found in database` },
+        { status: 404 }
+      );
+    }
+
+    // 2. Create corporation in Supabase
     const { data: corporation, error: corpError } = await supabase
       .from("corporations")
       .insert({
         name: corporation_name,
-        org_slug: org_slug,
+        org_id: org.id,
         external_id: admin_user.external_id,
       })
       .select()
@@ -72,18 +86,18 @@ export async function POST(req: Request) {
       throw new Error(`Failed to create corporation: ${corpError.message}`);
     }
 
-    // 2. Get the parent org from Clerk
+    // 4. Get the parent org from Clerk
     const orgsResponse = await clerk.organizations.getOrganizationList();
-    const parentOrg = orgsResponse.data.find((org) => org.slug === org_slug);
+    const parentOrg = orgsResponse.data.find((o) => o.slug === org_slug);
 
     if (!parentOrg) {
       return NextResponse.json(
-        { ok: false, error: `Organization ${org_slug} not found` },
+        { ok: false, error: `Clerk organization ${org_slug} not found` },
         { status: 404 }
       );
     }
 
-    // 3. Check if user exists in Clerk
+    // 5. Check if user exists in Clerk
     const usersResponse = await clerk.users.getUserList({
       emailAddress: [admin_user.email],
     });
@@ -111,7 +125,7 @@ export async function POST(req: Request) {
       clerkUserId = user.id;
     }
 
-    // 4. Add user to Clerk organization with corp_admin role
+    // 6. Add user to Clerk organization with corp_admin role
     const membershipsResponse =
       await clerk.organizations.getOrganizationMembershipList({
         organizationId: parentOrg.id,
@@ -135,7 +149,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. Update user metadata with corporation ID
+    // 7. Update user metadata with corporation ID
     await clerk.users.updateUserMetadata(clerkUserId, {
       publicMetadata: {
         external_id: admin_user.external_id,
@@ -144,7 +158,7 @@ export async function POST(req: Request) {
       },
     });
 
-    // 6. Wait briefly for Clerk webhook to create profile, then get it
+    // 8. Wait briefly for Clerk webhook to create profile, then get it
     // The Clerk user.created webhook will call upsert_profile RPC
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -158,7 +172,7 @@ export async function POST(req: Request) {
       throw new Error(`Profile not found after user creation: ${profileError.message}`);
     }
 
-    // 7. Create corp_membership linking profile to corporation
+    // 9. Create corp_membership linking profile to corporation
     const { error: membershipError } = await supabase
       .from("corp_memberships")
       .insert({
@@ -171,7 +185,7 @@ export async function POST(req: Request) {
       throw new Error(`Failed to create corp membership: ${membershipError.message}`);
     }
 
-    // 8. Log the sync
+    // 10. Log the sync
     await supabase.from("org_sync_log").insert({
       sync_type: "admin_provisioned",
       payload: data,
