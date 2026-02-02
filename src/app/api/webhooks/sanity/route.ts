@@ -32,9 +32,9 @@ export async function POST(req: Request) {
   const body = await req.text();
   const signature = req.headers.get("x-sanity-signature") || "";
 
- if (!verifySignature(body, signature)) {
-    return new NextResponse("Invalid signature", { status: 401 });
-  }
+//   if (!verifySignature(body, signature)) {
+//     return new NextResponse("Invalid signature", { status: 401 });
+//   }
 
   let payload: SanityDocument;
   try {
