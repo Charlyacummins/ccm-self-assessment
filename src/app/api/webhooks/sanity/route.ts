@@ -30,11 +30,11 @@ function verifySignature(body: string, signature: string): boolean {
 
 export async function POST(req: Request) {
   const body = await req.text();
-  const signature = req.headers.get("sanity-webhook-signature") || "";
+  const signature = req.headers.get("x-sanity-signature") || "";
 
-//   if (!verifySignature(body, signature)) {
-//     return new NextResponse("Invalid signature", { status: 401 });
-//   }
+ if (!verifySignature(body, signature)) {
+    return new NextResponse("Invalid signature", { status: 401 });
+  }
 
   let payload: SanityDocument;
   try {
@@ -102,7 +102,7 @@ async function syncLearningPath(doc: SanityDocument) {
       .from("learning_paths")
       .select("id")
       .eq("external_id", doc._id)
-      .single();
+      .maybeSingle();
 
     let data, error;
 
