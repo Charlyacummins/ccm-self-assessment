@@ -6,10 +6,12 @@ import crypto from "crypto";
 interface AdminProvisionPayload {
   org_slug: string; // 'ncma' or 'worldcc'
   corporation_name: string;
+  corporation_external_id: string; // Corporation ID from WorldCC/NCMA system
+  cohort_external_id: string; // Cohort ID from WorldCC/NCMA system
   admin_user: {
     email: string;
     full_name: string;
-    external_id: string; // ID from WorldCC/NCMA system
+    external_id: string; // Admin user ID from WorldCC/NCMA system
   };
 }
 
@@ -44,9 +46,9 @@ export async function POST(req: Request) {
     return new NextResponse("Invalid JSON", { status: 400 });
   }
 
-  const { org_slug, corporation_name, admin_user } = data;
+  const { org_slug, corporation_name, corporation_external_id, cohort_external_id, admin_user } = data;
 
-  if (!org_slug || !corporation_name || !admin_user?.email) {
+  if (!org_slug || !corporation_name || !corporation_external_id || !cohort_external_id || !admin_user?.email) {
     return NextResponse.json(
       { ok: false, error: "Missing required fields" },
       { status: 400 }
@@ -77,7 +79,7 @@ export async function POST(req: Request) {
       .insert({
         name: corporation_name,
         org_id: org.id,
-        external_id: admin_user.external_id,
+        external_id: corporation_external_id,
       })
       .select()
       .single();
@@ -179,13 +181,29 @@ export async function POST(req: Request) {
         user_id: profile.id,
         corporation_id: corporation.id,
         role: "corp_admin",
+        external_id: admin_user.external_id,
       });
 
     if (membershipError) {
       throw new Error(`Failed to create corp membership: ${membershipError.message}`);
     }
 
-    // 10. Log the sync
+    // 10. Create cohort for the corporation with admin assigned
+    const { data: cohort, error: cohortError } = await supabase
+      .from("cohorts")
+      .insert({
+        corporation_id: corporation.id,
+        admin_id: profile.id,
+        external_id: cohort_external_id,
+      })
+      .select()
+      .single();
+
+    if (cohortError) {
+      throw new Error(`Failed to create cohort: ${cohortError.message}`);
+    }
+
+    // 11. Log the sync
     await supabase.from("org_sync_log").insert({
       sync_type: "admin_provisioned",
       payload: data,
@@ -196,6 +214,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       corporationId: corporation.id,
+      cohortId: cohort.id,
       clerkUserId,
       profileId: profile.id,
     });
