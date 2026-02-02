@@ -32,9 +32,9 @@ export async function POST(req: Request) {
   const body = await req.text();
   const signature = req.headers.get("sanity-webhook-signature") || "";
 
-//   if (!verifySignature(body, signature)) {
-//     return new NextResponse("Invalid signature", { status: 401 });
-//   }
+   if (!verifySignature(body, signature)) {
+    return new NextResponse("Invalid signature", { status: 401 });
+  }
 
   let payload: SanityDocument;
   try {
@@ -97,14 +97,31 @@ async function syncLearningPath(doc: SanityDocument) {
       metadata: doc.metadata || null,
     };
 
-    const { data, error } = await supabase
+    // First try to find existing record
+    const { data: existing } = await supabase
       .from("learning_paths")
-      .upsert(learningPath, {
-        onConflict: "external_id",
-        ignoreDuplicates: false,
-      })
-      .select()
+      .select("id")
+      .eq("external_id", doc._id)
       .single();
+
+    let data, error;
+
+    if (existing) {
+      // Update existing
+      ({ data, error } = await supabase
+        .from("learning_paths")
+        .update(learningPath)
+        .eq("external_id", doc._id)
+        .select()
+        .single());
+    } else {
+      // Insert new
+      ({ data, error } = await supabase
+        .from("learning_paths")
+        .insert(learningPath)
+        .select()
+        .single());
+    }
 
     if (error) throw error;
 
