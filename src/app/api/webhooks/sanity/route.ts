@@ -1,96 +1,107 @@
-// /api/webhooks/sanity/route.ts
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import crypto from "crypto";
 
-import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
+interface SanityDocument {
+  _type: string;
+  _id: string;
+  title?: string;
+  description?: string;
+  url?: string;
+  metadata?: Record<string, unknown>;
+  orgId?: string;
+  templateId?: string;
+  minScore?: number;
+  maxScore?: number;
+  priority?: number;
+  learningPath?: {
+    _ref: string;
+  };
+}
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-// Verify Sanity webhook signature
 function verifySignature(body: string, signature: string): boolean {
   const secret = process.env.SANITY_WEBHOOK_SECRET;
   if (!secret) return true; // Skip verification if no secret set
-  
-  const hash = crypto
-    .createHmac('sha256', secret)
-    .update(body)
-    .digest('hex');
-  
+
+  const hash = crypto.createHmac("sha256", secret).update(body).digest("hex");
+
   return hash === signature;
 }
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
+  const body = await req.text();
+  const signature = req.headers.get("sanity-webhook-signature") || "";
+
+  if (!verifySignature(body, signature)) {
+    return new NextResponse("Invalid signature", { status: 401 });
+  }
+
+  let payload: SanityDocument;
   try {
-    const body = await request.text();
-    const signature = request.headers.get('sanity-webhook-signature') || '';
-    
-    // Verify webhook is from Sanity
-    if (!verifySignature(body, signature)) {
-      return Response.json({ error: 'Invalid signature' }, { status: 401 });
-    }
+    payload = JSON.parse(body);
+  } catch {
+    return new NextResponse("Invalid JSON", { status: 400 });
+  }
 
-    const payload = JSON.parse(body);
-    const { _type, _id } = payload;
+  const { _type, _id } = payload;
 
-    console.log(`Sanity webhook received: ${_type} - ${_id}`);
+  console.log(`Sanity webhook received: ${_type} - ${_id}`);
 
-    let result;
-    
+  try {
+    let result: { success: boolean; id?: string; error?: string };
+
     switch (_type) {
-      case 'learningPath':
+      case "learningPath":
         result = await syncLearningPath(payload);
         break;
-      case 'learningPathRule':
+      case "learningPathRule":
         result = await syncLearningPathRule(payload);
         break;
       default:
-        return Response.json({ 
-          status: 'ignored', 
-          message: `Unhandled document type: ${_type}` 
+        return NextResponse.json({
+          ok: true,
+          status: "ignored",
+          message: `Unhandled document type: ${_type}`,
         });
     }
 
     if (result.success) {
-      return Response.json({ 
-        status: 'success',
+      return NextResponse.json({
+        ok: true,
         type: _type,
-        id: result.id
+        id: result.id,
       });
     } else {
-      return Response.json({ 
-        status: 'error', 
-        message: result.error 
-      }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: 500 }
+      );
     }
-    
-  } catch (error) {
-    console.error('Sanity webhook error:', error);
-    return Response.json({ 
-      status: 'error', 
-      message: String(error) 
-    }, { status: 500 });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    console.error("Sanity webhook error:", message);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
 
-async function syncLearningPath(doc: any) {
+async function syncLearningPath(doc: SanityDocument) {
+  const supabase = db();
+
   try {
     const learningPath = {
-      external_id: doc._id, // Use Sanity _id as external_id
+      external_id: doc._id,
       org_id: doc.orgId || null,
       title: doc.title,
       description: doc.description || null,
       url: doc.url || null,
-      metadata: doc.metadata || null
+      metadata: doc.metadata || null,
     };
 
-    // Upsert based on external_id (handles both create and update)
     const { data, error } = await supabase
-      .from('learning_paths')
-      .upsert(learningPath, { 
-        onConflict: 'external_id',
-        ignoreDuplicates: false 
+      .from("learning_paths")
+      .upsert(learningPath, {
+        onConflict: "external_id",
+        ignoreDuplicates: false,
       })
       .select()
       .single();
@@ -98,37 +109,43 @@ async function syncLearningPath(doc: any) {
     if (error) throw error;
 
     console.log(`Synced learning path: ${data.id}`);
-    
+
     return { success: true, id: data.id };
   } catch (error) {
-    console.error('Learning path sync error:', error);
+    console.error("Learning path sync error:", error);
     return { success: false, error: String(error) };
   }
 }
 
-async function syncLearningPathRule(doc: any) {
+async function syncLearningPathRule(doc: SanityDocument) {
+  const supabase = db();
+
   try {
-    // Resolve the learning path reference to get Supabase ID
+    if (!doc.learningPath?._ref) {
+      throw new Error("Learning path reference is required");
+    }
+
     const learningPathId = await resolveLearningPathId(doc.learningPath._ref);
-    
+
     if (!learningPathId) {
-      throw new Error(`Learning path not found for reference: ${doc.learningPath._ref}`);
+      throw new Error(
+        `Learning path not found for reference: ${doc.learningPath._ref}`
+      );
     }
 
     const rule = {
       org_id: doc.orgId || null,
       template_id: doc.templateId || null,
-      skill_group_id: null,  // Not using for now
-      template_skill_id: null,  // Not using for now
+      skill_group_id: null,
+      template_skill_id: null,
       min_score: doc.minScore,
       max_score: doc.maxScore,
       learning_path_id: learningPathId,
-      priority: doc.priority || 0
+      priority: doc.priority || 0,
     };
 
-    // Just insert new rule
     const { data, error } = await supabase
-      .from('learning_path_rules')
+      .from("learning_path_rules")
       .insert(rule)
       .select()
       .single();
@@ -136,21 +153,22 @@ async function syncLearningPathRule(doc: any) {
     if (error) throw error;
 
     console.log(`Created learning path rule: ${data.id}`);
-    
+
     return { success: true, id: data.id };
   } catch (error) {
-    console.error('Learning path rule sync error:', error);
+    console.error("Learning path rule sync error:", error);
     return { success: false, error: String(error) };
   }
 }
 
-// Helper to resolve learning path Sanity reference to Supabase ID
 async function resolveLearningPathId(sanityRef: string): Promise<string | null> {
+  const supabase = db();
+
   const { data } = await supabase
-    .from('learning_paths')
-    .select('id')
-    .eq('external_id', sanityRef)
+    .from("learning_paths")
+    .select("id")
+    .eq("external_id", sanityRef)
     .single();
-  
+
   return data?.id || null;
 }
