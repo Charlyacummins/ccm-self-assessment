@@ -21,20 +21,43 @@ interface SanityDocument {
 
 function verifySignature(body: string, signature: string): boolean {
   const secret = process.env.SANITY_WEBHOOK_SECRET;
-  if (!secret) return true; // Skip verification if no secret set
+  if (!secret) {
+    console.log('No SANITY_WEBHOOK_SECRET found, skipping verification');
+    return true;
+  }
 
-  const hash = crypto.createHmac("sha256", secret).update(body).digest("hex");
+  if (!signature) {
+    console.log('No signature header found');
+    return false;
+  }
 
-  return hash === signature;
+  // Sanity sends signature as: sha256=<hash> or sometimes just the hash
+  const signatureHash = signature.startsWith('sha256=') 
+    ? signature.replace('sha256=', '') 
+    : signature;
+  
+  const hash = crypto
+    .createHmac("sha256", secret)
+    .update(body)
+    .digest("hex");
+
+  console.log('Signature verification:', {
+    received: signatureHash.substring(0, 10) + '...',
+    computed: hash.substring(0, 10) + '...',
+    match: hash === signatureHash
+  });
+
+  return hash === signatureHash;
 }
 
 export async function POST(req: Request) {
   const body = await req.text();
   const signature = req.headers.get("x-sanity-signature") || "";
 
-//   if (!verifySignature(body, signature)) {
-//     return new NextResponse("Invalid signature", { status: 401 });
-//   }
+  if (!verifySignature(body, signature)) {
+    console.log('Signature verification failed');
+    return new NextResponse("Invalid signature", { status: 401 });
+  }
 
   let payload: SanityDocument;
   try {
