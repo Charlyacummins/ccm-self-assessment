@@ -211,6 +211,7 @@ export async function POST(req: Request) {
         company_id: corporation.id,
         admin_id: profile.id,
         external_id: cohort_external_id,
+        template_id: "c9bd8551-b8f4-4255-b2b7-c1b86f18907d",
       })
       .select()
       .single();
