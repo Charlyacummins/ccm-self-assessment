@@ -188,7 +188,23 @@ export async function POST(req: Request) {
       throw new Error(`Failed to create corp membership: ${membershipError.message}`);
     }
 
-    // 10. Create cohort for the corporation with admin assigned
+    // 10. Add admin to org_memberships
+    const { error: orgMembershipError } = await supabase
+      .from("org_memberships")
+      .upsert(
+        {
+          user_id: profile.id,
+          org_id: org.id,
+          role: "corp_admin",
+        },
+        { onConflict: "user_id,org_id" }
+      );
+
+    if (orgMembershipError) {
+      throw new Error(`Failed to create org membership: ${orgMembershipError.message}`);
+    }
+
+    // 12. Create cohort for the corporation with admin assigned
     const { data: cohort, error: cohortError } = await supabase
       .from("cohorts")
       .insert({
@@ -203,7 +219,7 @@ export async function POST(req: Request) {
       throw new Error(`Failed to create cohort: ${cohortError.message}`);
     }
 
-    // 11. Log the sync
+    // 13. Log the sync
     await supabase.from("org_sync_log").insert({
       sync_type: "admin_provisioned",
       payload: data,

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { Webhook } from "svix";
 import type { WebhookEvent } from "@clerk/nextjs/server";
-import { db } from "@/lib/db"; // your server-side Supabase client
+import { clerkClient } from "@clerk/nextjs/server";
+import { db } from "@/lib/db";
 
 export async function POST(req: Request) {
   const payload = await req.text();
@@ -32,11 +33,39 @@ export async function POST(req: Request) {
       case "user.created":
       case "user.updated": {
         const u = evt.data;
-        await supabase.rpc("upsert_profile", {
+        const profileId = await supabase.rpc("upsert_profile", {
           p_clerk_user_id: u.id,
           p_full_name: [u.first_name, u.last_name].filter(Boolean).join(" ") || null,
           p_email: u.email_addresses?.[0]?.email_address ?? null,
         });
+
+        // Sync org memberships from Clerk
+        const clerk = await clerkClient();
+        const memberships = await clerk.users.getOrganizationMembershipList({
+          userId: u.id,
+        });
+
+        for (const membership of memberships.data) {
+          // Look up org in Supabase by slug
+          const { data: org } = await supabase
+            .from("organizations")
+            .select("id")
+            .eq("slug", membership.organization.slug)
+            .single();
+
+          if (org) {
+            await supabase
+              .from("org_memberships")
+              .upsert(
+                {
+                  user_id: profileId.data,
+                  org_id: org.id,
+                  role: membership.role,
+                },
+                { onConflict: "user_id,org_id" }
+              );
+          }
+        }
         break;
       }
     }
