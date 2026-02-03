@@ -74,7 +74,7 @@ export async function POST(req: Request) {
     // 3. Find cohort by external_id
     const { data: cohort, error: cohortError } = await supabase
       .from("cohorts")
-      .select("id, admin_id, corporation_id")
+      .select("id, admin_id, company_id")
       .eq("external_id", cohort_external_id)
       .single();
 
@@ -107,7 +107,7 @@ export async function POST(req: Request) {
     const { data: corp } = await supabase
       .from("corporations")
       .select("org_id")
-      .eq("id", cohort.corporation_id)
+      .eq("id", cohort.company_id)
       .single();
 
     // 7. Update log entry
