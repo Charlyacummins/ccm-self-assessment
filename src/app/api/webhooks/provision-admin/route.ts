@@ -160,18 +160,25 @@ export async function POST(req: Request) {
       },
     });
 
-    // 8. Wait briefly for Clerk webhook to create profile, then get it
-    // The Clerk user.created webhook will call upsert_profile RPC
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // 8. Upsert profile directly (same as Clerk webhook does)
+    const { data: profileId, error: upsertError } = await supabase.rpc("upsert_profile", {
+      p_clerk_user_id: clerkUserId,
+      p_full_name: admin_user.full_name,
+      p_email: admin_user.email,
+    });
+
+    if (upsertError || !profileId) {
+      throw new Error(`Failed to upsert profile: ${upsertError?.message ?? "no profile id returned"}`);
+    }
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select()
-      .eq("clerk_user_id", clerkUserId)
+      .eq("id", profileId)
       .single();
 
-    if (profileError) {
-      throw new Error(`Profile not found after user creation: ${profileError.message}`);
+    if (profileError || !profile) {
+      throw new Error(`Profile not found after upsert: ${profileError?.message ?? "unknown"}`);
     }
 
     // 9. Create corp_membership linking profile to corporation
