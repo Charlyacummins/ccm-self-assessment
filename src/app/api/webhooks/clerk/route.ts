@@ -60,7 +60,7 @@ export async function POST(req: Request) {
                 {
                   user_id: profileId.data,
                   org_id: org.id,
-                  role: membership.role,
+                  role: null,
                 },
                 { onConflict: "user_id,org_id" }
               );

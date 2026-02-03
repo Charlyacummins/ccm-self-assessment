@@ -195,7 +195,7 @@ export async function POST(req: Request) {
         {
           user_id: profile.id,
           org_id: org.id,
-          role: "corp_admin",
+          role: "admin",
         },
         { onConflict: "user_id,org_id" }
       );
