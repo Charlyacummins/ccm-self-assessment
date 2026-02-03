@@ -195,7 +195,7 @@ export async function POST(req: Request) {
         {
           user_id: profile.id,
           org_id: org.id,
-          role: "admin",
+          role: "corp_admin",
         },
         { onConflict: "user_id,org_id" }
       );
@@ -208,7 +208,7 @@ export async function POST(req: Request) {
     const { data: cohort, error: cohortError } = await supabase
       .from("cohorts")
       .insert({
-        corporation_id: corporation.id,
+        company_id: corporation.id,
         admin_id: profile.id,
         external_id: cohort_external_id,
       })
