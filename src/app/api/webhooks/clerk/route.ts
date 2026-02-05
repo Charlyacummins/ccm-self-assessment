@@ -66,6 +66,30 @@ export async function POST(req: Request) {
               );
           }
         }
+
+        // Handle cohort invitation metadata (only on user creation)
+        if (evt.type === "user.created") {
+          const cohortId = u.public_metadata?.cohortId as string | undefined;
+          if (cohortId) {
+            const addedBy = u.public_metadata?.addedBy as string | undefined;
+            const cohortGroupId = u.public_metadata?.cohortGroupId as string | undefined;
+
+            const cohortMember: Record<string, unknown> = {
+              cohort_id: cohortId,
+              user_id: profileId.data,
+              status: "active",
+              added_at: new Date().toISOString(),
+              added_by: addedBy ?? null,
+            };
+
+            if (cohortGroupId) {
+              cohortMember.cohort_group = cohortGroupId;
+            }
+
+            await supabase.from("cohort_members").insert(cohortMember);
+          }
+        }
+
         break;
       }
     }
