@@ -67,12 +67,48 @@ export async function POST(req: Request) {
           }
         }
 
-        // Handle cohort invitation metadata (only on user creation)
+        // Handle new user setup (only on user creation)
         if (evt.type === "user.created") {
+          // Determine org_id
+          let orgId: string | null = null;
+
+          // Priority 1: From cohort invitation metadata
+          if (u.public_metadata?.organizationId) {
+            orgId = u.public_metadata.organizationId as string;
+          }
+          // Priority 2: From SSO connection
+          else if (u.external_accounts && u.external_accounts.length > 0) {
+            const ssoProvider = u.external_accounts[0].identification_id;
+            if (ssoProvider === "worldcc_sso") {
+              orgId = process.env.WORLDCC_ORG_ID!;
+            } else if (ssoProvider === "ncma_sso") {
+              orgId = process.env.NCMA_ORG_ID!;
+            }
+          }
+          // Priority 3: Default to CCMI for regular signups
+          else {
+            orgId = process.env.CCMI_ORG_ID!;
+          }
+
+          if (orgId) {
+            await supabase
+              .from("org_memberships")
+              .upsert(
+                {
+                  user_id: profileId.data,
+                  org_id: orgId,
+                  role: "user",
+                },
+                { onConflict: "user_id,org_id" }
+              );
+          }
+
+          // Handle cohort invitation metadata
           const cohortId = u.public_metadata?.cohortId as string | undefined;
           if (cohortId) {
             const addedBy = u.public_metadata?.addedBy as string | undefined;
             const cohortGroupId = u.public_metadata?.cohortGroupId as string | undefined;
+            const corporationId = u.public_metadata?.corporationId as string | undefined;
 
             const cohortMember: Record<string, unknown> = {
               cohort_id: cohortId,
@@ -87,6 +123,19 @@ export async function POST(req: Request) {
             }
 
             await supabase.from("cohort_members").insert(cohortMember);
+
+            if (corporationId) {
+              await supabase
+                .from("corp_memberships")
+                .upsert(
+                  {
+                    user_id: profileId.data,
+                    corporation_id: corporationId,
+                    role: "member",
+                  },
+                  { onConflict: "user_id,corporation_id" }
+                );
+            }
           }
         }
 
