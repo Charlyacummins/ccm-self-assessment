@@ -67,8 +67,9 @@ export async function POST(req: Request) {
           }
         }
 
-        // Handle new user setup (only on user creation)
-        if (evt.type === "user.created") {
+        // Handle new user setup (only on user creation, skip for provisioned admins)
+        const isProvisionedAdmin = u.public_metadata?.role === "corp:admin";
+        if (evt.type === "user.created" && !isProvisionedAdmin) {
           // Determine org_id
           let orgId: string | null = null;
 
