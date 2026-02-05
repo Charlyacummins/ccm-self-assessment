@@ -84,6 +84,8 @@ export async function POST(req: Request) {
               orgId = process.env.WORLDCC_ORG_ID!;
             } else if (ssoProvider === "ncma_sso") {
               orgId = process.env.NCMA_ORG_ID!;
+            } else {
+              orgId = process.env.CCMI_ORG_ID!;
             }
           }
           // Priority 3: Default to CCMI for regular signups
