@@ -17,6 +17,8 @@ interface SanityDocument {
   learningPath?: {
     _ref: string;
   };
+  name?: string;
+  eventDate?: string;
 }
 
 function verifySignature(body: string, signature: string): boolean {
@@ -56,6 +58,9 @@ export async function POST(req: Request) {
         break;
       case "learningPathRule":
         result = await syncLearningPathRule(payload);
+        break;
+      case "upcomingEvent":
+        result = await syncUpcomingEvent(payload);
         break;
       default:
         return NextResponse.json({
@@ -188,4 +193,49 @@ async function resolveLearningPathId(sanityRef: string): Promise<string | null> 
     .single();
 
   return data?.id || null;
+}
+
+async function syncUpcomingEvent(doc: SanityDocument) {
+  const supabase = db();
+
+  try {
+    const event = {
+      external_id: doc._id,
+      name: doc.name!,
+      description: doc.description || null,
+      event_date: doc.eventDate || null,
+    };
+
+    const { data: existing } = await supabase
+      .from("upcoming_events")
+      .select("id")
+      .eq("external_id", doc._id)
+      .maybeSingle();
+
+    let data, error;
+
+    if (existing) {
+      ({ data, error } = await supabase
+        .from("upcoming_events")
+        .update(event)
+        .eq("id", existing.id)
+        .select()
+        .single());
+    } else {
+      ({ data, error } = await supabase
+        .from("upcoming_events")
+        .insert(event)
+        .select()
+        .single());
+    }
+
+    if (error) throw error;
+
+    console.log(`Synced upcoming event: ${data.id}`);
+
+    return { success: true, id: String(data.id) };
+  } catch (error) {
+    console.error("Upcoming event sync error:", error);
+    return { success: false, error: String(error) };
+  }
 }
