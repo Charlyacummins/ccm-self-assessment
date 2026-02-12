@@ -24,29 +24,29 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider
-    appearance={{
-        // choose a base (optional)
-        variables: {
-          colorText: 'var(--institute-blue)'
-        },
-        elements: {
-
-          formButtonPrimary:
-            "!bg-[rgb(var(--institute-blue))] text-primary-foreground hover:bg-primary/90 h-11 rounded-lg",
-          formFieldInput:
-            "bg-white dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700 focus:ring-2 focus:ring-primary/40",
-          socialButtonsBlockButton:
-            "border-2 border-primary text-primary hover:bg-primary/5",
-        },
-      }}>
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <ClerkProvider
+          appearance={{
+            // choose a base (optional)
+            variables: {
+              colorText: "var(--institute-blue)",
+            },
+            elements: {
+              formButtonPrimary:
+                "!bg-[rgb(var(--institute-blue))] text-primary-foreground hover:bg-primary/90 h-11 rounded-lg",
+              formFieldInput:
+                "bg-white dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700 focus:ring-2 focus:ring-primary/40",
+              socialButtonsBlockButton:
+                "border-2 border-primary text-primary hover:bg-primary/5",
+            },
+          }}
+        >
+          {children}
+        </ClerkProvider>
       </body>
     </html>
-    </ClerkProvider>
   );
 }
