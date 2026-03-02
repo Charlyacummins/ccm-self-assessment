@@ -93,7 +93,7 @@ async function upsertResolvedMemberships(params: {
       {
         user_id: profileId,
         corporation_id: corporationId,
-        role: "user",
+        role: "employee",
       },
       { onConflict: "user_id,corporation_id" }
     );

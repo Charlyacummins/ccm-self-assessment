@@ -75,7 +75,7 @@ async function upsertCorpMembership(
       {
         user_id: userId,
         corporation_id: corporationId,
-        role: "user",
+        role: "employee",
       },
       { onConflict: "user_id,corporation_id" }
     );
