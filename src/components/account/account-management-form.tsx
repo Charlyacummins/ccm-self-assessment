@@ -17,7 +17,7 @@ export type AccountManagementData = {
   seniorityLevel: string;
 };
 
-type FilterOptions = Record<string, string[]>;
+type FilterOptions = Record<string, unknown[]>;
 
 export function AccountManagementForm({
   initialData,
@@ -45,13 +45,11 @@ export function AccountManagementForm({
     setSaving(true);
     setStatus(null);
 
-    const { subRegion: _ignoredSubRegion, ...payload } = form;
-
     try {
       const res = await fetch("/api/account/management", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(form),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -154,18 +152,14 @@ export function AccountManagementForm({
               <label className="text-xs font-medium text-[#004070]">
                 Years of Experience
               </label>
-              <select
+              <Input
+                type="number"
+                min={0}
+                step={1}
                 value={form.yearsExperience}
                 onChange={(e) => updateField("yearsExperience", e.target.value)}
-                className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-[#004070]"
-              >
-                <option value="">Select</option>
-                {(options.yearsExperience ?? []).map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                placeholder="Enter years (e.g. 6)"
+              />
             </div>
             <div className="space-y-2">
               <label className="text-xs font-medium text-[#004070]">

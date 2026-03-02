@@ -60,19 +60,27 @@ export default async function AssessmentStartPage() {
     }
   }
 
-  // Fetch skill groups for this template (ordered)
-  const { data: skillGroups } = await supabase
-    .from("template_skill_groups")
-    .select("id, name")
-    .eq("template_id", templateId)
-    .order("id");
-
   // Fetch all questions (template_skills) for this template with their response options
   const { data: skills } = await supabase
     .from("template_skills")
     .select("id, name, meta_json, skill_group_id, order_index")
     .contains("meta_json", { template_ids: [templateId] })
     .order("order_index");
+
+  const skillGroupIds = [
+    ...new Set(
+      (skills ?? [])
+        .map((skill) => skill.skill_group_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    ),
+  ];
+
+  const { data: skillGroups } = skillGroupIds.length
+    ? await supabase
+        .from("template_skill_groups")
+        .select("id, name")
+        .in("id", skillGroupIds)
+    : { data: [] as SkillGroup[] };
 
   // Fetch response options for all skills
   const skillIds = (skills ?? []).map((s) => s.id);

@@ -15,21 +15,21 @@ export const getUserRole = cache(async (clerkUserId: string): Promise<UserRole> 
     return "user";
   }
 
-  const { data: membership } = await supabase
+  const { data: memberships } = await supabase
     .from("org_memberships")
     .select("role")
     .eq("user_id", profile.id)
-    .limit(1)
-    .single();
+    .not("role", "is", null);
 
-  if (!membership) {
+  if (!memberships || memberships.length === 0) {
     return "user";
   }
 
-  switch (membership.role) {
-    case "admin":      return "admin";
-    case "corp_admin": return "corp_admin";
-    case "reviewer":   return "reviewer";
-    default:           return "user";
-  }
+  const roles = new Set(memberships.map((membership) => membership.role));
+
+  // Prefer the highest-privilege role if a user belongs to multiple orgs.
+  if (roles.has("admin")) return "admin";
+  if (roles.has("corp_admin")) return "corp_admin";
+  if (roles.has("reviewer")) return "reviewer";
+  return "user";
 });

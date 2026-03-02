@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { resolveYearsExperienceValue } from "@/lib/years-experience";
 
 export async function GET(req: Request) {
   const { userId } = await auth();
@@ -20,6 +21,10 @@ export async function GET(req: Request) {
   }
 
   const supabase = db();
+  const yearsExperience = await resolveYearsExperienceValue(
+    supabase,
+    searchParams.get("yearsExperience")
+  );
 
   const { data, error } = await supabase.rpc(
     "rpc_dynamic_skill_benchmark_live",
@@ -36,9 +41,7 @@ export async function GET(req: Request) {
       p_role: searchParams.get("role") || null,
       p_region: searchParams.get("region") || null,
       p_sub_region: searchParams.get("subRegion") || null,
-      p_years_experience: searchParams.get("yearsExperience")
-        ? Number(searchParams.get("yearsExperience"))
-        : null,
+      p_years_experience: yearsExperience,
       p_education_level: searchParams.get("educationLevel") || null,
     }
   );

@@ -14,11 +14,11 @@ export default async function Home() {
   // Route based on role — expand as admin/reviewer dashboards are built
   switch (role) {
     case "admin":
-      redirect("/dashboard");
+      redirect("/admin/dashboard");
     case "corp_admin":
-      redirect("/dashboard");
+      redirect("/corp-admin/dashboard");
     case "reviewer":
-      redirect("/dashboard");
+      redirect("/reviewer/dashboard");
     default:
       redirect("/dashboard");
   }

@@ -1,5 +1,6 @@
 "use client";
 
+import { Download } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   type ChartConfig,
@@ -22,9 +23,10 @@ interface ChartDatum {
   name: string;
   you: number;
   benchmark: number;
+  reviewerScore?: number;
 }
 
-const chartConfig = {
+const baseChartConfig = {
   you: {
     label: "You",
     color: "#004070",
@@ -35,6 +37,14 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
+const reviewerChartConfig = {
+  ...baseChartConfig,
+  reviewerScore: {
+    label: "Reviewer",
+    color: "#0070B8",
+  },
+} satisfies ChartConfig;
+
 export function AssessmentResultsChart({
   skillGroups,
   templateId,
@@ -42,6 +52,9 @@ export function AssessmentResultsChart({
   filters,
   onSelectGroup,
   benchmarks,
+  keyBarSlot,
+  reviewerScores,
+  showReviewerScores,
 }: {
   skillGroups: SkillGroupResult[];
   templateId: string;
@@ -49,6 +62,9 @@ export function AssessmentResultsChart({
   filters: Record<string, string>;
   onSelectGroup: (groupId: string) => void;
   benchmarks: Record<string, BenchmarkData>;
+  keyBarSlot?: React.ReactNode;
+  reviewerScores?: Record<string, number>;
+  showReviewerScores?: boolean;
 }) {
   if (!hasResults) {
     return (
@@ -82,8 +98,11 @@ export function AssessmentResultsChart({
       name: sg.name,
       you: userPct,
       benchmark: bmPct,
+      reviewerScore: reviewerScores?.[sg.id] ?? 0,
     };
   });
+
+  const chartConfig = showReviewerScores ? reviewerChartConfig : baseChartConfig;
 
   return (
     <Card>
@@ -93,7 +112,11 @@ export function AssessmentResultsChart({
           <h2 className="text-lg font-semibold text-[#004070]">
             Assessment Results
           </h2>
-          <div />
+          <button
+            className="rounded-full border border-[#00ABEB] p-2 text-[#00ABEB] transition-colors hover:bg-[#00ABEB]/5"
+          >
+            <Download className="h-4 w-4" />
+          </button>
         </div>
 
         <ChartContainer config={chartConfig} className="mt-6 h-64 w-full">
@@ -122,6 +145,15 @@ export function AssessmentResultsChart({
               onClick={(data) => onSelectGroup(data.payload.id)}
               className="cursor-pointer"
             />
+            {showReviewerScores && (
+              <Bar
+                dataKey="reviewerScore"
+                fill="var(--color-reviewerScore)"
+                radius={[4, 4, 0, 0]}
+                onClick={(data) => onSelectGroup(data.payload.id)}
+                className="cursor-pointer"
+              />
+            )}
           </BarChart>
         </ChartContainer>
 
@@ -145,17 +177,19 @@ export function AssessmentResultsChart({
         </div>
 
         {/* Key */}
-        <div className="mt-4 flex items-center gap-4 rounded-lg border px-4 py-2 text-xs">
-          <span className="font-medium text-muted-foreground">Key</span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-sm bg-[#004070]" />
-            You
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-sm bg-[#00ABEB]" />
-            Benchmark
-          </span>
-        </div>
+        {keyBarSlot ?? (
+          <div className="mt-4 flex items-center gap-4 rounded-lg border px-4 py-2 text-xs">
+            <span className="font-medium text-muted-foreground">Key</span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-3 w-3 rounded-sm bg-[#004070]" />
+              You
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-3 w-3 rounded-sm bg-[#00ABEB]" />
+              Benchmark
+            </span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

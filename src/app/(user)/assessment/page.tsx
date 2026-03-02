@@ -49,10 +49,16 @@ export default async function AssessmentPage() {
     .select("id", { count: "exact", head: true })
     .contains("meta_json", { template_ids: [templateId] });
 
-  const { count: sectionCount } = await supabase
-    .from("template_skill_groups")
-    .select("id", { count: "exact", head: true })
-    .eq("template_id", templateId);
+  const { data: sectionRows } = await supabase
+    .from("template_skills")
+    .select("skill_group_id")
+    .contains("meta_json", { template_ids: [templateId] });
+
+  const sectionCount = new Set(
+    (sectionRows ?? [])
+      .map((row) => row.skill_group_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+  ).size;
 
   const questions = questionCount ?? 0;
   const estLow = Math.max(1, Math.ceil((questions * 0.5)));

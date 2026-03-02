@@ -1,3 +1,4 @@
+import { Suspense, cache } from "react";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
@@ -6,8 +7,133 @@ import { LearningPaths } from "@/components/dashboard/learning-paths";
 import { ScoresByCategory } from "@/components/dashboard/scores-by-category";
 import { StartQuestionnaire } from "@/components/dashboard/start-questionnaire";
 import { UpcomingWebinars } from "@/components/dashboard/upcoming-webinars";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const DEFAULT_TEMPLATE_ID = "c9bd8551-b8f4-4255-b2b7-c1b86f18907d";
+
+// Deduplicated across concurrent server components in the same render
+const fetchUserScoreData = cache(async (profileId: string, templateId: string) => {
+  const supabase = db();
+
+  let hasResults = false;
+  const scoresByGroupId: Record<
+    string,
+    { total: number; count: number; totalPossible: number }
+  > = {};
+
+  const { data: assessment } = await supabase
+    .from("assessments")
+    .select("id")
+    .eq("user_id", profileId)
+    .eq("template_id", templateId)
+    .eq("status", "submitted")
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (assessment) {
+    hasResults = true;
+
+    const { data: skillScores } = await supabase
+      .from("assessment_skill_scores")
+      .select("final_score, template_skill_id, template_skills(skill_group_id, max_points)")
+      .eq("assessment_id", assessment.id);
+
+    if (skillScores) {
+      for (const ss of skillScores) {
+        const skill = ss.template_skills as unknown as {
+          skill_group_id: string;
+          max_points: number;
+        };
+        const groupId = skill?.skill_group_id;
+        if (!groupId || ss.final_score == null) continue;
+
+        if (!scoresByGroupId[groupId]) {
+          scoresByGroupId[groupId] = { total: 0, count: 0, totalPossible: 0 };
+        }
+        scoresByGroupId[groupId].total += Number(ss.final_score);
+        scoresByGroupId[groupId].count += 1;
+        scoresByGroupId[groupId].totalPossible += skill.max_points ?? 0;
+      }
+    }
+  }
+
+  return { hasResults, scoresByGroupId };
+});
+
+type SkillGroup = { id: string; name: string };
+
+function ResultsAtAGlanceSkeleton() {
+  return (
+    <Card>
+      <CardHeader>
+        <Skeleton className="h-5 w-48" />
+      </CardHeader>
+      <CardContent className="flex items-center justify-center py-8">
+        <Skeleton className="h-48 w-48 rounded-full" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function ScoresByCategorySkeleton() {
+  return (
+    <Card>
+      <CardHeader>
+        <Skeleton className="h-5 w-40" />
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <Skeleton className="h-3 w-24 shrink-0" />
+            <Skeleton className="h-3 flex-1" />
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+async function ResultsAtAGlanceServer({
+  profileId,
+  templateId,
+  skillGroups,
+}: {
+  profileId: string;
+  templateId: string;
+  skillGroups: SkillGroup[];
+}) {
+  const { hasResults, scoresByGroupId } = await fetchUserScoreData(profileId, templateId);
+  const chartData = skillGroups.map((sg) => {
+    const agg = scoresByGroupId[sg.id];
+    return {
+      name: sg.name,
+      score: agg && agg.totalPossible > 0 ? Math.round((agg.total / agg.totalPossible) * 100) : 0,
+    };
+  });
+  return <ResultsAtAGlance data={chartData} hasResults={hasResults} />;
+}
+
+async function ScoresByCategoryServer({
+  profileId,
+  templateId,
+  skillGroups,
+}: {
+  profileId: string;
+  templateId: string;
+  skillGroups: SkillGroup[];
+}) {
+  const { hasResults, scoresByGroupId } = await fetchUserScoreData(profileId, templateId);
+  const skillGroupsWithScores = skillGroups.map((sg) => {
+    const agg = scoresByGroupId[sg.id];
+    return {
+      ...sg,
+      score: agg && agg.totalPossible > 0 ? Math.round((agg.total / agg.totalPossible) * 100) : 0,
+    };
+  });
+  return <ScoresByCategory skillGroups={skillGroupsWithScores} hasResults={hasResults} />;
+}
 
 export default async function Dashboard() {
   const { userId } = await auth();
@@ -15,14 +141,12 @@ export default async function Dashboard() {
 
   const supabase = db();
 
-  // Get profile
   const { data: profile } = await supabase
     .from("profiles")
     .select("id")
     .eq("clerk_user_id", userId)
     .single();
 
-  // Resolve template_id: check if user has a cohort with a different template, otherwise default
   let templateId = DEFAULT_TEMPLATE_ID;
   if (profile) {
     const { data: cohortMember } = await supabase
@@ -30,7 +154,7 @@ export default async function Dashboard() {
       .select("cohort_id")
       .eq("user_id", profile.id)
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (cohortMember) {
       const { data: cohort } = await supabase
@@ -38,104 +162,64 @@ export default async function Dashboard() {
         .select("template_id")
         .eq("id", cohortMember.cohort_id)
         .single();
-
-      if (cohort?.template_id) {
-        templateId = cohort.template_id;
-      }
+      if (cohort?.template_id) templateId = cohort.template_id;
     }
   }
 
-  // Fetch skill groups for the template
-  const { data: skillGroups } = await supabase
-    .from("template_skill_groups")
-    .select("id, name")
-    .eq("template_id", templateId)
-    .order("name");
+  const { data: templateSkills } = await supabase
+    .from("template_skills")
+    .select("skill_group_id")
+    .contains("meta_json", { template_ids: [templateId] });
 
-  // Look up user's latest submitted assessment
-  let hasResults = false;
-  const scoresByGroupId: Record<
-    string,
-    { total: number; count: number; totalPossible: number }
-  > = {};
+  const skillGroupIds = [
+    ...new Set(
+      (templateSkills ?? [])
+        .map((row) => row.skill_group_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    ),
+  ];
 
-  if (profile) {
-    const { data: assessment } = await supabase
-      .from("assessments")
-      .select("id")
-      .eq("user_id", profile.id)
-      .eq("template_id", templateId)
-      .eq("status", "submitted")
-      .order("submitted_at", { ascending: false })
-      .limit(1)
-      .single();
+  const { data: skillGroups } = skillGroupIds.length
+    ? await supabase
+        .from("template_skill_groups")
+        .select("id, name")
+        .in("id", skillGroupIds)
+        .order("name")
+    : { data: [] as SkillGroup[] };
 
-    if (assessment) {
-      hasResults = true;
-
-      // Fetch skill scores joined with template_skills to get skill_group_id
-      const { data: skillScores } = await supabase
-        .from("assessment_skill_scores")
-        .select(
-          "final_score, template_skill_id, template_skills(skill_group_id, max_points)"
-        )
-        .eq("assessment_id", assessment.id);
-
-      if (skillScores) {
-        for (const ss of skillScores) {
-          const skill = ss.template_skills as unknown as {
-            skill_group_id: string;
-            max_points: number;
-          };
-          const groupId = skill?.skill_group_id;
-          if (!groupId || ss.final_score == null) continue;
-
-          if (!scoresByGroupId[groupId]) {
-            scoresByGroupId[groupId] = { total: 0, count: 0, totalPossible: 0 };
-          }
-          scoresByGroupId[groupId].total += Number(ss.final_score);
-          scoresByGroupId[groupId].count += 1;
-          scoresByGroupId[groupId].totalPossible += skill.max_points ?? 0;
-        }
-      }
-    }
-  }
-
-  // Build chart data: skill group names with percentage scores
-  const chartData = (skillGroups ?? []).map((sg) => {
-    const agg = scoresByGroupId[sg.id];
-    return {
-      name: sg.name,
-      score:
-        agg && agg.totalPossible > 0
-          ? Math.round((agg.total / agg.totalPossible) * 100)
-          : 0,
-    };
-  });
-
-  // Build scores-by-category data with per-group percentage scores
-  const skillGroupsWithScores = (skillGroups ?? []).map((sg) => {
-    const agg = scoresByGroupId[sg.id];
-    return {
-      ...sg,
-      score:
-        agg && agg.totalPossible > 0
-          ? Math.round((agg.total / agg.totalPossible) * 100)
-          : 0,
-    };
-  });
+  const groups = skillGroups ?? [];
 
   return (
     <div className="space-y-6">
-      {/* Top row: Results + Learning Paths */}
+      {/* Top row: Results at a glance + Learning Paths */}
       <div className="grid gap-6 lg:grid-cols-[1fr_1.5fr]">
-        <ResultsAtAGlance data={chartData} hasResults={hasResults} />
+        {profile ? (
+          <Suspense fallback={<ResultsAtAGlanceSkeleton />}>
+            <ResultsAtAGlanceServer
+              profileId={profile.id}
+              templateId={templateId}
+              skillGroups={groups}
+            />
+          </Suspense>
+        ) : (
+          <ResultsAtAGlanceSkeleton />
+        )}
         <LearningPaths />
       </div>
 
       {/* Bottom row: Scores, Questionnaire, Webinars */}
       <div className="grid gap-6 lg:grid-cols-3">
-        <ScoresByCategory skillGroups={skillGroupsWithScores} hasResults={hasResults} />
+        {profile ? (
+          <Suspense fallback={<ScoresByCategorySkeleton />}>
+            <ScoresByCategoryServer
+              profileId={profile.id}
+              templateId={templateId}
+              skillGroups={groups}
+            />
+          </Suspense>
+        ) : (
+          <ScoresByCategorySkeleton />
+        )}
         <StartQuestionnaire />
         <UpcomingWebinars />
       </div>

@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { ResultsPage } from "@/components/results/results-page";
+import { CorpResultsPage } from "@/components/results/corp-results-page";
 
 const DEFAULT_TEMPLATE_ID = "c9bd8551-b8f4-4255-b2b7-c1b86f18907d";
 
@@ -18,8 +19,10 @@ export default async function Results() {
     .eq("clerk_user_id", userId)
     .single();
 
-  // Resolve template_id
+  // Resolve template_id and corporation
   let templateId = DEFAULT_TEMPLATE_ID;
+  let corporationId: string | null = null;
+  let cohortId: string | null = null;
   if (profile) {
     const { data: cohortMember } = await supabase
       .from("cohort_members")
@@ -29,24 +32,42 @@ export default async function Results() {
       .single();
 
     if (cohortMember) {
+      cohortId = cohortMember.cohort_id;
       const { data: cohort } = await supabase
         .from("cohorts")
-        .select("template_id")
+        .select("template_id, company_id")
         .eq("id", cohortMember.cohort_id)
         .single();
 
       if (cohort?.template_id) {
         templateId = cohort.template_id;
       }
+      if (cohort?.company_id) {
+        corporationId = cohort.company_id;
+      }
     }
   }
 
-  // Fetch skill groups for template
-  const { data: skillGroups } = await supabase
-    .from("template_skill_groups")
-    .select("id, name")
-    .eq("template_id", templateId)
-    .order("name");
+  const { data: templateSkills } = await supabase
+    .from("template_skills")
+    .select("skill_group_id")
+    .contains("meta_json", { template_ids: [templateId] });
+
+  const skillGroupIds = [
+    ...new Set(
+      (templateSkills ?? [])
+        .map((row) => row.skill_group_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    ),
+  ];
+
+  const { data: skillGroups } = skillGroupIds.length
+    ? await supabase
+        .from("template_skill_groups")
+        .select("id, name")
+        .in("id", skillGroupIds)
+        .order("name")
+    : { data: [] as Array<{ id: string; name: string }> };
 
   // Get user's latest submitted assessment
   let hasResults = false;
@@ -126,6 +147,20 @@ export default async function Results() {
 
   // Feedback text (placeholder until reviewer feedback is built)
   const feedbackText = "";
+
+  if (corporationId && cohortId) {
+    return (
+      <CorpResultsPage
+        hasResults={hasResults}
+        templateId={templateId}
+        corporationId={corporationId}
+        cohortId={cohortId}
+        skillGroupResults={skillGroupResults}
+        skillScores={skillScores}
+        feedbackText={feedbackText}
+      />
+    );
+  }
 
   return (
     <ResultsPage

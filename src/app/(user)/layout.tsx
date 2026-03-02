@@ -18,6 +18,18 @@ export default async function UserLayout({
 
   const role = await getUserRole(userId);
 
+  if (role === "admin") {
+    redirect("/admin/dashboard");
+  }
+
+  if (role === "corp_admin") {
+    redirect("/corp-admin/dashboard");
+  }
+
+  if (role === "reviewer") {
+    redirect("/reviewer/dashboard");
+  }
+
   return (
     <RoleProvider role={role}>
       <div className="flex min-h-screen flex-col">

@@ -4,7 +4,8 @@ import crypto from "crypto";
 
 interface SeatUpdatePayload {
   admin_external_id: string;
-  cohort_external_id: string;
+  cohort_id?: string;
+  cohort_external_id?: string;
   seat_count: number;
 }
 
@@ -13,15 +14,27 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
     return false;
   }
 
-  const expectedSignature = crypto
-    .createHmac("sha256", process.env.PROVISION_WEBHOOK_SECRET)
-    .update(payload)
-    .digest("hex");
+  // Reject malformed signatures before timingSafeEqual (it throws on length mismatch).
+  if (!/^[a-f0-9]{64}$/i.test(signature)) {
+    return false;
+  }
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+  try {
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.PROVISION_WEBHOOK_SECRET)
+      .update(payload)
+      .digest("hex");
+
+    const receivedBuffer = Buffer.from(signature, "hex");
+    const expectedBuffer = Buffer.from(expectedSignature, "hex");
+
+    return (
+      receivedBuffer.length === expectedBuffer.length &&
+      crypto.timingSafeEqual(receivedBuffer, expectedBuffer)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(req: Request) {
@@ -39,11 +52,11 @@ export async function POST(req: Request) {
     return new NextResponse("Invalid JSON", { status: 400 });
   }
 
-  const { admin_external_id, cohort_external_id, seat_count } = data;
+  const { admin_external_id, cohort_id, cohort_external_id, seat_count } = data;
 
-  if (!admin_external_id || !cohort_external_id || seat_count === undefined) {
+  if (!admin_external_id || (!cohort_id && !cohort_external_id) || seat_count === undefined) {
     return NextResponse.json(
-      { ok: false, error: "Missing required fields: admin_external_id, cohort_external_id, seat_count" },
+      { ok: false, error: "Missing required fields: admin_external_id, seat_count, and one of cohort_id or cohort_external_id" },
       { status: 400 }
     );
   }
@@ -79,15 +92,20 @@ export async function POST(req: Request) {
       throw new Error(`Admin not found with external_id: ${admin_external_id}`);
     }
 
-    // 3. Find cohort by external_id
-    const { data: cohort, error: cohortError } = await supabase
+    // 3. Find cohort by internal id (preferred) or external_id (legacy)
+    const cohortLookup = supabase
       .from("cohorts")
-      .select("id, admin_id, company_id")
-      .eq("external_id", cohort_external_id)
-      .single();
+      .select("id, admin_id, company_id");
+    const { data: cohort, error: cohortError } = cohort_id
+      ? await cohortLookup.eq("id", cohort_id).single()
+      : await cohortLookup.eq("external_id", cohort_external_id!).single();
 
     if (cohortError || !cohort) {
-      throw new Error(`Cohort not found with external_id: ${cohort_external_id}`);
+      throw new Error(
+        cohort_id
+          ? `Cohort not found with id: ${cohort_id}`
+          : `Cohort not found with external_id: ${cohort_external_id}`
+      );
     }
 
     // 4. Verify admin matches cohort

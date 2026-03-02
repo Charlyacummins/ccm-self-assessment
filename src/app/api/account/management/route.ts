@@ -20,8 +20,17 @@ export async function POST(req: Request) {
     functionalArea,
     seniorityLevel,
   } = body ?? {};
-
   const supabase = db();
+  const yearsExperienceNumber =
+    yearsExperience === "" || yearsExperience == null
+      ? null
+      : Number(yearsExperience);
+  const yearsExperienceValue =
+    yearsExperienceNumber != null &&
+    Number.isFinite(yearsExperienceNumber) &&
+    yearsExperienceNumber >= 0
+      ? yearsExperienceNumber
+      : null;
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -51,7 +60,7 @@ export async function POST(req: Request) {
         sub_region: subRegion || null,
         job_role: jobRole || null,
         industry: industry || null,
-        years_experience: yearsExperience ? Number(yearsExperience) : null,
+        years_experience: yearsExperienceValue,
         education_level: educationLevel || null,
         functional_area: functionalArea || null,
         seniority_level: seniorityLevel || null,

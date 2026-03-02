@@ -27,6 +27,12 @@ export async function GET() {
           .select("key, label")
           .order("order_index");
         if (error) console.error(`filter-options: ${table}`, error.message);
+        if (key === "yearsExperience") {
+          return [
+            key,
+            (data ?? []).map((r) => ({ key: String(r.key), label: r.label })),
+          ] as const;
+        }
         return [key, (data ?? []).map((r) => r.label)] as const;
       })
     ),

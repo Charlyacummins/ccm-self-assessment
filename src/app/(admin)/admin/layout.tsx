@@ -1,15 +1,17 @@
-// src/app/(admin)/layout.tsx
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/admin/Sidebar";
+import { getUserRole } from "@/lib/get-user-role";
 
 export default async function AdminLayout({
   children,
 }: { children: React.ReactNode }) {
-  const { userId, orgRole } = await auth();  // 👈 await this
+  const { userId } = await auth();
 
   if (!userId) redirect("/login");
-  if (!orgRole || !["admin", "owner"].includes(orgRole)) redirect("/dashboard");
+
+  const role = await getUserRole(userId);
+  if (role !== "admin") redirect("/dashboard");
 
   return (
     <div className="grid min-h-screen grid-cols-[240px_1fr]">

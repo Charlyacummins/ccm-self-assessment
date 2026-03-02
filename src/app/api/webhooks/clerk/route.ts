@@ -4,6 +4,123 @@ import type { WebhookEvent } from "@clerk/nextjs/server";
 import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 
+type InviteRole = "user" | "reviewer";
+
+function normalizeEmail(value: string | undefined | null): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function parseInviteRole(value: unknown): InviteRole {
+  return value === "reviewer" ? "reviewer" : "user";
+}
+
+async function upsertOrgMembership(
+  supabase: ReturnType<typeof db>,
+  userId: string,
+  orgId: string,
+  role: InviteRole
+) {
+  const { data: existing, error: existingError } = await supabase
+    .from("org_memberships")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  if (existing?.role === "admin" || existing?.role === "corp_admin") {
+    return;
+  }
+
+  const nextRole =
+    existing?.role === "reviewer" || role === "reviewer" ? "reviewer" : "user";
+
+  const { error } = await supabase
+    .from("org_memberships")
+    .upsert(
+      {
+        user_id: userId,
+        org_id: orgId,
+        role: nextRole,
+      },
+      { onConflict: "user_id,org_id" }
+    );
+
+  if (error) throw new Error(error.message);
+}
+
+async function upsertCorpMembership(
+  supabase: ReturnType<typeof db>,
+  userId: string,
+  corporationId: string
+) {
+  const { data: existing, error: existingError } = await supabase
+    .from("corp_memberships")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("corporation_id", corporationId)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+  if (existing?.role === "corp_admin") return;
+
+  const { error } = await supabase
+    .from("corp_memberships")
+    .upsert(
+      {
+        user_id: userId,
+        corporation_id: corporationId,
+        role: "user",
+      },
+      { onConflict: "user_id,corporation_id" }
+    );
+
+  if (error) throw new Error(error.message);
+}
+
+async function upsertCohortMember(
+  supabase: ReturnType<typeof db>,
+  userId: string,
+  cohortId: string,
+  role: InviteRole
+) {
+  const { data: existing, error: existingError } = await supabase
+    .from("cohort_members")
+    .select("role")
+    .eq("cohort_id", cohortId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  if (existing) {
+    const { error: updateError } = await supabase
+      .from("cohort_members")
+      .update({
+        role,
+        status: "active",
+      })
+      .eq("cohort_id", cohortId)
+      .eq("user_id", userId);
+
+    if (updateError) throw new Error(updateError.message);
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from("cohort_members")
+    .insert({
+      cohort_id: cohortId,
+      user_id: userId,
+      role,
+      status: "active",
+      added_at: new Date().toISOString(),
+    });
+
+  if (insertError) throw new Error(insertError.message);
+}
+
 export async function POST(req: Request) {
   const payload = await req.text();
 
@@ -54,91 +171,105 @@ export async function POST(req: Request) {
             .single();
 
           if (org) {
-            await supabase
-              .from("org_memberships")
-              .upsert(
-                {
-                  user_id: profileId.data,
-                  org_id: org.id,
-                  role: null,
-                },
-                { onConflict: "user_id,org_id" }
-              );
+            await upsertOrgMembership(supabase, profileId.data, org.id, "user");
           }
         }
 
         // Handle new user setup (only on user creation, skip for provisioned admins)
         const isProvisionedAdmin = u.public_metadata?.role === "corp:admin";
         if (evt.type === "user.created" && !isProvisionedAdmin) {
-          // Determine org_id
-          let orgId: string | null = null;
+          const email = normalizeEmail(u.email_addresses?.[0]?.email_address);
+          const { data: pendingInvites } = email
+            ? await supabase
+                .from("pending_invites")
+                .select("id, cohort_id, role")
+                .eq("email", email)
+            : { data: [] as Array<{ id: string; cohort_id: string | null; role: string }> };
 
-          // Priority 1: From cohort invitation metadata
-          if (u.public_metadata?.organizationId) {
-            orgId = u.public_metadata.organizationId as string;
-          }
-          // Priority 2: From SSO connection
-          else if (u.external_accounts && u.external_accounts.length > 0) {
-            const ssoProvider = u.external_accounts[0].identification_id;
-            if (ssoProvider === "worldcc_sso") {
-              orgId = process.env.WORLDCC_ORG_ID!;
-            } else if (ssoProvider === "ncma_sso") {
-              orgId = process.env.NCMA_ORG_ID!;
+          if ((pendingInvites?.length ?? 0) > 0) {
+            const cohortIds = [...new Set(
+              (pendingInvites ?? [])
+                .map((invite) => invite.cohort_id)
+                .filter((value): value is string => typeof value === "string" && value.length > 0)
+            )];
+
+            const { data: cohorts } = cohortIds.length
+              ? await supabase
+                  .from("cohorts")
+                  .select("id, company_id")
+                  .in("id", cohortIds)
+              : { data: [] as Array<{ id: string; company_id: string | null }> };
+
+            const corporationIds = [...new Set(
+              (cohorts ?? [])
+                .map((cohort) => cohort.company_id)
+                .filter((value): value is string => typeof value === "string" && value.length > 0)
+            )];
+
+            const { data: corporations } = corporationIds.length
+              ? await supabase
+                  .from("corporations")
+                  .select("id, org_id")
+                  .in("id", corporationIds)
+              : { data: [] as Array<{ id: string; org_id: string | null }> };
+
+            const cohortById = new Map((cohorts ?? []).map((cohort) => [cohort.id, cohort]));
+            const corporationById = new Map(
+              (corporations ?? []).map((corporation) => [corporation.id, corporation])
+            );
+            const orgRoleById = new Map<string, InviteRole>();
+
+            for (const invite of pendingInvites ?? []) {
+              const cohortId = invite.cohort_id;
+              if (!cohortId) continue;
+
+              const cohort = cohortById.get(cohortId);
+              const corporationId = cohort?.company_id ?? null;
+              if (!cohort || !corporationId) continue;
+
+              const inviteRole = parseInviteRole(invite.role);
+              const corporation = corporationById.get(corporationId);
+
+              await upsertCorpMembership(supabase, profileId.data, corporationId);
+              await upsertCohortMember(supabase, profileId.data, cohortId, inviteRole);
+
+              if (corporation?.org_id) {
+                const currentOrgRole = orgRoleById.get(corporation.org_id) ?? "user";
+                orgRoleById.set(
+                  corporation.org_id,
+                  currentOrgRole === "reviewer" || inviteRole === "reviewer"
+                    ? "reviewer"
+                    : "user"
+                );
+              }
+            }
+
+            for (const [orgId, role] of orgRoleById.entries()) {
+              await upsertOrgMembership(supabase, profileId.data, orgId, role);
+            }
+          } else {
+            // No trusted pending invite: create a standard user org membership only.
+            let orgId: string | null = null;
+            if (u.external_accounts && u.external_accounts.length > 0) {
+              const ssoProvider = u.external_accounts[0].identification_id;
+              if (ssoProvider === "worldcc_sso") {
+                orgId = process.env.WORLDCC_ORG_ID!;
+              } else if (ssoProvider === "ncma_sso") {
+                orgId = process.env.NCMA_ORG_ID!;
+              } else {
+                orgId = process.env.CCMI_ORG_ID!;
+              }
             } else {
               orgId = process.env.CCMI_ORG_ID!;
             }
-          }
-          // Priority 3: Default to CCMI for regular signups
-          else {
-            orgId = process.env.CCMI_ORG_ID!;
-          }
 
-          if (orgId) {
-            await supabase
-              .from("org_memberships")
-              .upsert(
-                {
-                  user_id: profileId.data,
-                  org_id: orgId,
-                  role: "user",
-                },
-                { onConflict: "user_id,org_id" }
-              );
-          }
-
-          // Handle cohort invitation metadata
-          const cohortId = u.public_metadata?.cohortId as string | undefined;
-          if (cohortId) {
-            const addedBy = u.public_metadata?.addedBy as string | undefined;
-            const cohortGroupId = u.public_metadata?.cohortGroupId as string | undefined;
-            const corporationId = u.public_metadata?.corporationId as string | undefined;
-
-            const cohortMember: Record<string, unknown> = {
-              cohort_id: cohortId,
-              user_id: profileId.data,
-              status: "active",
-              added_at: new Date().toISOString(),
-              added_by: addedBy ?? null,
-            };
-
-            if (cohortGroupId) {
-              cohortMember.cohort_group = cohortGroupId;
+            if (orgId) {
+              await upsertOrgMembership(supabase, profileId.data, orgId, "user");
             }
+          }
 
-            await supabase.from("cohort_members").insert(cohortMember);
-
-            if (corporationId) {
-              await supabase
-                .from("corp_memberships")
-                .upsert(
-                  {
-                    user_id: profileId.data,
-                    corporation_id: corporationId,
-                    role: "member",
-                  },
-                  { onConflict: "user_id,corporation_id" }
-                );
-            }
+          if (email) {
+            await supabase.from("pending_invites").delete().eq("email", email);
           }
         }
 

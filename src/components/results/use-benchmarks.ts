@@ -70,6 +70,7 @@ export function useBenchmarks({
   const [benchmarks, setBenchmarks] = useState<Record<string, BenchmarkData>>(
     {}
   );
+  const [isLoading, setIsLoading] = useState(enabled);
 
   const fetchBenchmarks = useCallback(async () => {
     const filterKey = stableFilterKey(filters);
@@ -117,12 +118,16 @@ export function useBenchmarks({
   }, [filters, skillGroups, templateId]);
 
   useEffect(() => {
-    if (!enabled || skillGroups.length === 0) return;
+    if (!enabled || skillGroups.length === 0) {
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
     let cancelled = false;
 
     (async () => {
       await fetchBenchmarks();
-      if (cancelled) return;
+      if (!cancelled) setIsLoading(false);
     })();
 
     return () => {
@@ -130,5 +135,5 @@ export function useBenchmarks({
     };
   }, [enabled, skillGroups, fetchBenchmarks]);
 
-  return benchmarks;
+  return { data: benchmarks, isLoading };
 }

@@ -31,7 +31,7 @@ export function ResultsPage({
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
-  const benchmarks = useBenchmarks({
+  const { data: benchmarks, isLoading: benchmarksLoading } = useBenchmarks({
     skillGroups: skillGroupResults,
     templateId,
     filters,
@@ -59,7 +59,10 @@ export function ResultsPage({
         benchmarks={benchmarks}
       />
 
-      <BenchmarkOptions onApply={setFilters} />
+      <BenchmarkOptions
+        onApply={setFilters}
+        showDateRange
+      />
 
       <AssessmentFeedback
         hasResults={hasResults}
@@ -68,6 +71,7 @@ export function ResultsPage({
         filters={filters}
         feedbackText={feedbackText}
         benchmarks={benchmarks}
+        benchmarksLoading={benchmarksLoading}
       />
 
       <ResultsSkillSidebar

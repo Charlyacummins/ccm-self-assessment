@@ -7,7 +7,7 @@ interface AdminProvisionPayload {
   org_slug: string; // 'ncma' or 'worldcc'
   corporation_name: string;
   corporation_external_id: string; // Corporation ID from WorldCC/NCMA system
-  cohort_external_id: string; // Cohort ID from WorldCC/NCMA system
+  cohort_external_id?: string; // Optional upstream cohort ID from WorldCC/NCMA system
   admin_user: {
     email: string;
     full_name: string;
@@ -20,15 +20,27 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
     return false;
   }
 
-  const expectedSignature = crypto
-    .createHmac("sha256", process.env.PROVISION_WEBHOOK_SECRET)
-    .update(payload)
-    .digest("hex");
+  // Reject malformed signatures before timingSafeEqual (it throws on length mismatch).
+  if (!/^[a-f0-9]{64}$/i.test(signature)) {
+    return false;
+  }
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+  try {
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.PROVISION_WEBHOOK_SECRET)
+      .update(payload)
+      .digest("hex");
+
+    const receivedBuffer = Buffer.from(signature, "hex");
+    const expectedBuffer = Buffer.from(expectedSignature, "hex");
+
+    return (
+      receivedBuffer.length === expectedBuffer.length &&
+      crypto.timingSafeEqual(receivedBuffer, expectedBuffer)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(req: Request) {
@@ -48,7 +60,7 @@ export async function POST(req: Request) {
 
   const { org_slug, corporation_name, corporation_external_id, cohort_external_id, admin_user } = data;
 
-  if (!org_slug || !corporation_name || !corporation_external_id || !cohort_external_id || !admin_user?.email) {
+  if (!org_slug || !corporation_name || !corporation_external_id || !admin_user?.email) {
     return NextResponse.json(
       { ok: false, error: "Missing required fields" },
       { status: 400 }
@@ -57,6 +69,7 @@ export async function POST(req: Request) {
 
   const supabase = db();
   const clerk = await clerkClient();
+  const defaultCohortName = `${corporation_name} ${new Date().getFullYear()}`;
 
   try {
     // 1. Look up organization in Supabase by slug
@@ -73,19 +86,37 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Create corporation in Supabase
-    const { data: corporation, error: corpError } = await supabase
+    // 2. Reuse existing corporation by external_id when present (idempotent retries),
+    // otherwise create it.
+    let corporation: { id: string; org_id: string; external_id: string | null };
+    const { data: existingCorporation, error: existingCorpError } = await supabase
       .from("corporations")
-      .insert({
-        name: corporation_name,
-        org_id: org.id,
-        external_id: corporation_external_id,
-      })
-      .select()
-      .single();
+      .select("id, org_id, external_id")
+      .eq("external_id", corporation_external_id)
+      .maybeSingle();
 
-    if (corpError) {
-      throw new Error(`Failed to create corporation: ${corpError.message}`);
+    if (existingCorpError) {
+      throw new Error(`Failed to look up corporation: ${existingCorpError.message}`);
+    }
+
+    if (existingCorporation) {
+      corporation = existingCorporation;
+    } else {
+      const { data: createdCorporation, error: corpError } = await supabase
+        .from("corporations")
+        .insert({
+          name: corporation_name,
+          org_id: org.id,
+          external_id: corporation_external_id,
+        })
+        .select("id, org_id, external_id")
+        .single();
+
+      if (corpError || !createdCorporation) {
+        throw new Error(`Failed to create corporation: ${corpError?.message ?? "unknown"}`);
+      }
+
+      corporation = createdCorporation;
     }
 
     // 4. Get the parent org from Clerk
@@ -181,15 +212,41 @@ export async function POST(req: Request) {
       throw new Error(`Profile not found after upsert: ${profileError?.message ?? "unknown"}`);
     }
 
-    // 9. Create corp_membership linking profile to corporation
+    // Persist the upstream user identifier on the profile so SSO-linked users
+    // can be resolved before their first sign-in.
+    if (profile.external_id && profile.external_id !== admin_user.external_id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Profile external_id mismatch for user ${profile.id}`,
+        },
+        { status: 409 }
+      );
+    }
+
+    if (!profile.external_id) {
+      const { error: profileExternalIdError } = await supabase
+        .from("profiles")
+        .update({ external_id: admin_user.external_id })
+        .eq("id", profile.id);
+
+      if (profileExternalIdError) {
+        throw new Error(`Failed to set profile external_id: ${profileExternalIdError.message}`);
+      }
+    }
+
+    // 9. Upsert corp_membership linking profile to corporation (idempotent retries)
     const { error: membershipError } = await supabase
       .from("corp_memberships")
-      .insert({
-        user_id: profile.id,
-        corporation_id: corporation.id,
-        role: "corp_admin",
-        external_id: admin_user.external_id,
-      });
+      .upsert(
+        {
+          user_id: profile.id,
+          corporation_id: corporation.id,
+          role: "corp_admin",
+          external_id: admin_user.external_id,
+        },
+        { onConflict: "user_id,corporation_id" }
+      );
 
     if (membershipError) {
       throw new Error(`Failed to create corp membership: ${membershipError.message}`);
@@ -211,20 +268,71 @@ export async function POST(req: Request) {
       throw new Error(`Failed to create org membership: ${orgMembershipError.message}`);
     }
 
-    // 12. Create cohort for the corporation with admin assigned
-    const { data: cohort, error: cohortError } = await supabase
-      .from("cohorts")
-      .insert({
-        company_id: corporation.id,
-        admin_id: profile.id,
-        external_id: cohort_external_id,
-        template_id: "c9bd8551-b8f4-4255-b2b7-c1b86f18907d",
-      })
-      .select()
-      .single();
+    // 12. Reuse existing cohort when cohort_external_id is provided (idempotent retries).
+    let cohort: {
+      id: string;
+      external_id: string | null;
+      company_id: string;
+      admin_id: string;
+    };
 
-    if (cohortError) {
-      throw new Error(`Failed to create cohort: ${cohortError.message}`);
+    if (cohort_external_id) {
+      const { data: existingCohort, error: existingCohortError } = await supabase
+        .from("cohorts")
+        .select("id, external_id, company_id, admin_id")
+        .eq("external_id", cohort_external_id)
+        .maybeSingle();
+
+      if (existingCohortError) {
+        throw new Error(`Failed to look up cohort: ${existingCohortError.message}`);
+      }
+
+      if (existingCohort) {
+        if (existingCohort.company_id !== corporation.id || existingCohort.admin_id !== profile.id) {
+          return NextResponse.json(
+            { ok: false, error: `cohort_external_id '${cohort_external_id}' is already linked to a different cohort` },
+            { status: 409 }
+          );
+        }
+        cohort = existingCohort;
+      } else {
+        const { data: createdCohort, error: cohortError } = await supabase
+          .from("cohorts")
+          .insert({
+            company_id: corporation.id,
+            admin_id: profile.id,
+            created_by: profile.id,
+            name: defaultCohortName,
+            external_id: cohort_external_id,
+            template_id: "c9bd8551-b8f4-4255-b2b7-c1b86f18907d",
+          })
+          .select("id, external_id, company_id, admin_id")
+          .single();
+
+        if (cohortError || !createdCohort) {
+          throw new Error(`Failed to create cohort: ${cohortError?.message ?? "unknown"}`);
+        }
+
+        cohort = createdCohort;
+      }
+    } else {
+      const { data: createdCohort, error: cohortError } = await supabase
+        .from("cohorts")
+        .insert({
+          company_id: corporation.id,
+          admin_id: profile.id,
+          created_by: profile.id,
+          name: defaultCohortName,
+          template_id: "c9bd8551-b8f4-4255-b2b7-c1b86f18907d",
+        })
+        .select("id, external_id, company_id, admin_id")
+        .single();
+
+      if (cohortError || !createdCohort) {
+        throw new Error(`Failed to create cohort: ${cohortError?.message ?? "unknown"}`);
+      }
+
+      cohort = createdCohort;
     }
 
     // 13. Log the sync
@@ -239,6 +347,7 @@ export async function POST(req: Request) {
       ok: true,
       corporationId: corporation.id,
       cohortId: cohort.id,
+      cohortExternalId: cohort.external_id ?? null,
       clerkUserId,
       profileId: profile.id,
     });

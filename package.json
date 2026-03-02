@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:webhooks": "bash scripts/test-webhooks.sh"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.32.0",

@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   type ChartConfig,
   ChartContainer,
@@ -31,10 +32,11 @@ const chartConfig = {
 export function AssessmentFeedback({
   hasResults,
   skillGroups,
-  templateId,
-  filters,
+  templateId: _templateId,
+  filters: _filters,
   feedbackText,
   benchmarks,
+  benchmarksLoading = false,
 }: {
   hasResults: boolean;
   skillGroups: SkillGroupResult[];
@@ -42,7 +44,27 @@ export function AssessmentFeedback({
   filters: Record<string, string>;
   feedbackText: string;
   benchmarks: Record<string, BenchmarkData>;
+  benchmarksLoading?: boolean;
 }) {
+  if (benchmarksLoading && hasResults) {
+    return (
+      <Card>
+        <CardContent className="py-8">
+          <Skeleton className="mb-6 h-5 w-44" />
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-4 w-full" />
+              ))}
+              <Skeleton className="mt-4 h-9 w-24 rounded-full" />
+            </div>
+            <Skeleton className="h-48 w-full rounded-md" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const chartData: ChartDatum[] = skillGroups.map((sg) => {
     const bm = benchmarks[sg.id];
     const userPct =
