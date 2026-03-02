@@ -14,6 +14,10 @@ function parseInviteRole(value: unknown): InviteRole {
   return value === "reviewer" ? "reviewer" : "user";
 }
 
+function parseString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 async function upsertOrgMembership(
   supabase: ReturnType<typeof db>,
   userId: string,
@@ -150,9 +154,12 @@ export async function POST(req: Request) {
       case "user.created":
       case "user.updated": {
         const u = evt.data;
+        const metadataName = parseString(u.public_metadata?.name);
+        const resolvedFullName =
+          [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || metadataName || null;
         const profileId = await supabase.rpc("upsert_profile", {
           p_clerk_user_id: u.id,
-          p_full_name: [u.first_name, u.last_name].filter(Boolean).join(" ") || null,
+          p_full_name: resolvedFullName,
           p_email: u.email_addresses?.[0]?.email_address ?? null,
         });
 
@@ -175,9 +182,9 @@ export async function POST(req: Request) {
           }
         }
 
-        // Handle new user setup (only on user creation, skip for provisioned admins)
+        // Handle cohort invite reconciliation (skip for provisioned admins)
         const isProvisionedAdmin = u.public_metadata?.role === "corp:admin";
-        if (evt.type === "user.created" && !isProvisionedAdmin) {
+        if (!isProvisionedAdmin) {
           const email = normalizeEmail(u.email_addresses?.[0]?.email_address);
           const { data: pendingInvites } = email
             ? await supabase
@@ -186,9 +193,25 @@ export async function POST(req: Request) {
                 .eq("email", email)
             : { data: [] as Array<{ id: string; cohort_id: string | null; role: string }> };
 
-          if ((pendingInvites?.length ?? 0) > 0) {
+          const metadataCohortId = parseString(u.public_metadata?.cohortId);
+          const metadataInviteRole = parseInviteRole(u.public_metadata?.inviteRole);
+
+          const invitesToProcess =
+            (pendingInvites?.length ?? 0) > 0
+              ? (pendingInvites ?? [])
+              : metadataCohortId
+                ? [
+                    {
+                      id: "metadata-fallback",
+                      cohort_id: metadataCohortId,
+                      role: metadataInviteRole,
+                    },
+                  ]
+                : [];
+
+          if (invitesToProcess.length > 0) {
             const cohortIds = [...new Set(
-              (pendingInvites ?? [])
+              invitesToProcess
                 .map((invite) => invite.cohort_id)
                 .filter((value): value is string => typeof value === "string" && value.length > 0)
             )];
@@ -219,7 +242,7 @@ export async function POST(req: Request) {
             );
             const orgRoleById = new Map<string, InviteRole>();
 
-            for (const invite of pendingInvites ?? []) {
+            for (const invite of invitesToProcess) {
               const cohortId = invite.cohort_id;
               if (!cohortId) continue;
 
@@ -268,7 +291,7 @@ export async function POST(req: Request) {
             }
           }
 
-          if (email) {
+          if (email && (pendingInvites?.length ?? 0) > 0) {
             await supabase.from("pending_invites").delete().eq("email", email);
           }
         }

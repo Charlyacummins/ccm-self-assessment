@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 type InviteRole = "user" | "reviewer";
-const DEFAULT_INVITE_REDIRECT_URL = "https://ccm-self-assessment-staging.vercel.app";
+const DEFAULT_INVITE_REDIRECT_URL = "https://ccm-self-assessment-staging.vercel.app/signup";
 
 type InviteResponseStatus =
   | "invited"
