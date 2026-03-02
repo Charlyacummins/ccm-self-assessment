@@ -19,6 +19,12 @@ export type AccountManagementData = {
 
 type FilterOptions = Record<string, unknown[]>;
 
+function stringOptions(values: unknown[] | undefined): string[] {
+  return (values ?? []).filter(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+}
+
 export function AccountManagementForm({
   initialData,
 }: {
@@ -90,7 +96,7 @@ export function AccountManagementForm({
                 className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-[#004070]"
               >
                 <option value="">Select</option>
-                {(options.role ?? []).map((opt) => (
+                {stringOptions(options.role).map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}
                   </option>
@@ -107,7 +113,7 @@ export function AccountManagementForm({
                 className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-[#004070]"
               >
                 <option value="">Select</option>
-                {(options.industry ?? []).map((opt) => (
+                {stringOptions(options.industry).map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}
                   </option>
@@ -124,7 +130,7 @@ export function AccountManagementForm({
                 className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-[#004070]"
               >
                 <option value="">Select</option>
-                {(options.functionalArea ?? []).map((opt) => (
+                {stringOptions(options.functionalArea).map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}
                   </option>
@@ -141,7 +147,7 @@ export function AccountManagementForm({
                 className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-[#004070]"
               >
                 <option value="">Select</option>
-                {(options.jobLevel ?? []).map((opt) => (
+                {stringOptions(options.jobLevel).map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}
                   </option>
@@ -171,7 +177,7 @@ export function AccountManagementForm({
                 className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-[#004070]"
               >
                 <option value="">Select</option>
-                {(options.educationLevel ?? []).map((opt) => (
+                {stringOptions(options.educationLevel).map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}
                   </option>
@@ -188,7 +194,7 @@ export function AccountManagementForm({
                 className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-[#004070]"
               >
                 <option value="">Select</option>
-                {(options.country ?? []).map((opt) => (
+                {stringOptions(options.country).map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}
                   </option>
