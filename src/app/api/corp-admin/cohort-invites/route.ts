@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 type InviteRole = "user" | "reviewer";
+const DEFAULT_INVITE_REDIRECT_URL = "https://ccm-self-assessment-staging.vercel.app";
 
 type InviteResponseStatus =
   | "invited"
@@ -26,6 +27,31 @@ function normalizeName(value: unknown): string {
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function getClerkErrorDetails(error: unknown): { message: string; status: number } {
+  if (error && typeof error === "object") {
+    const maybe = error as {
+      status?: number;
+      errors?: Array<{ message?: string; longMessage?: string; code?: string }>;
+      message?: string;
+    };
+
+    const first = maybe.errors?.[0];
+    const detailedMessage =
+      first?.longMessage ||
+      first?.message ||
+      maybe.message ||
+      "Failed to create invitation";
+    const status = typeof maybe.status === "number" ? maybe.status : 500;
+
+    return { message: detailedMessage, status };
+  }
+
+  return {
+    message: error instanceof Error ? error.message : "Failed to create invitation",
+    status: 500,
+  };
 }
 
 async function upsertResolvedMemberships(params: {
@@ -140,6 +166,8 @@ export async function POST(req: Request) {
   }
 
   const supabase = db();
+  const redirectUrl =
+    process.env.CLERK_INVITE_REDIRECT_URL?.trim() || DEFAULT_INVITE_REDIRECT_URL;
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -263,6 +291,7 @@ export async function POST(req: Request) {
   try {
     await clerk.invitations.createInvitation({
       emailAddress: email,
+      redirectUrl,
       publicMetadata: {
         organizationId: corporation.org_id,
         corporationId: corporation.id,
@@ -275,11 +304,22 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    const { message, status } = getClerkErrorDetails(error);
+    console.error("corp-admin invite failed", {
+      email,
+      cohortId,
+      corporationId,
+      role,
+      redirectUrl,
+      status,
+      message,
+      raw: error,
+    });
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to create invitation",
+        error: message,
       },
-      { status: 500 }
+      { status }
     );
   }
 
