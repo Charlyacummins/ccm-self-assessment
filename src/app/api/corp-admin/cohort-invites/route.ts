@@ -114,7 +114,6 @@ async function upsertResolvedMemberships(params: {
       .from("cohort_members")
       .update({
         role,
-        status: "active",
         added_by: addedBy,
       })
       .eq("cohort_id", cohortId)
@@ -130,7 +129,6 @@ async function upsertResolvedMemberships(params: {
       cohort_id: cohortId,
       user_id: profileId,
       role,
-      status: "active",
       added_at: new Date().toISOString(),
       added_by: addedBy,
     });

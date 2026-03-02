@@ -103,7 +103,6 @@ async function upsertCohortMember(
       .from("cohort_members")
       .update({
         role,
-        status: "active",
       })
       .eq("cohort_id", cohortId)
       .eq("user_id", userId);
@@ -118,7 +117,6 @@ async function upsertCohortMember(
       cohort_id: cohortId,
       user_id: userId,
       role,
-      status: "active",
       added_at: new Date().toISOString(),
     });
 
