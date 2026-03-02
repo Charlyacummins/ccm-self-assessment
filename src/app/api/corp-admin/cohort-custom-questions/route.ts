@@ -25,6 +25,12 @@ export type CohortCustomQuestionsData = {
   }>;
 };
 
+type ResponseOptionDraft = {
+  responseText: string;
+  pointValue: number;
+  displayOrder: number;
+};
+
 function parseMetaJson(value: unknown): MetaJson {
   if (!value) return {};
   if (typeof value === "string") {
@@ -222,7 +228,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "cohortId, name, and questionText are required" }, { status: 400 });
   }
 
-  const responseOptions = responseOptionsInput
+  const responseOptions: ResponseOptionDraft[] = responseOptionsInput
     .map((option: unknown, index: number) => {
       const row = option as { responseText?: unknown; pointValue?: unknown };
       const responseText = typeof row.responseText === "string" ? row.responseText.trim() : "";
@@ -234,7 +240,7 @@ export async function POST(req: Request) {
         displayOrder: index,
       };
     })
-    .filter((option) => option.responseText.length > 0);
+    .filter((option: ResponseOptionDraft) => option.responseText.length > 0);
 
   if (responseOptions.length === 0) {
     return NextResponse.json({ error: "At least one response option is required" }, { status: 400 });
