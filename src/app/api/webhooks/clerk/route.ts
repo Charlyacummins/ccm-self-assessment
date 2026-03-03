@@ -5,6 +5,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 
 type InviteRole = "user" | "reviewer";
+const FINAL_ASSESSMENT_STATUSES = ["submitted", "in_review", "reviewed", "completed"];
 
 function normalizeEmail(value: string | undefined | null): string {
   return (value ?? "").trim().toLowerCase();
@@ -123,6 +124,77 @@ async function upsertCohortMember(
   if (insertError) throw new Error(insertError.message);
 }
 
+async function markAssessmentAccepted(params: {
+  supabase: ReturnType<typeof db>;
+  userId: string;
+  templateId: string | null;
+}) {
+  const { supabase, userId, templateId } = params;
+  if (!templateId) return;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("assessments")
+    .select("id, status")
+    .eq("user_id", userId)
+    .eq("template_id", templateId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  if (!existing) {
+    const { data: invited, error: invitedError } = await supabase
+      .from("assessments")
+      .insert({
+        user_id: userId,
+        template_id: templateId,
+        status: "invited",
+      })
+      .select("id")
+      .single();
+
+    if (invitedError || !invited) {
+      throw new Error(invitedError?.message ?? "Failed to create invited assessment");
+    }
+
+    const { error: acceptedError } = await supabase
+      .from("assessments")
+      .update({ status: "accepted" })
+      .eq("id", invited.id);
+
+    if (acceptedError) throw new Error(acceptedError.message);
+    return;
+  }
+
+  if (
+    (typeof existing.status === "string" &&
+      FINAL_ASSESSMENT_STATUSES.includes(existing.status)) ||
+    existing.status === "in_progress"
+  ) {
+    return;
+  }
+
+  if (existing.status === "invited") {
+    const { error: acceptedError } = await supabase
+      .from("assessments")
+      .update({ status: "accepted" })
+      .eq("id", existing.id);
+
+    if (acceptedError) throw new Error(acceptedError.message);
+    return;
+  }
+
+  if (existing.status !== "accepted") {
+    const { error: acceptedError } = await supabase
+      .from("assessments")
+      .update({ status: "accepted" })
+      .eq("id", existing.id);
+
+    if (acceptedError) throw new Error(acceptedError.message);
+  }
+}
+
 export async function POST(req: Request) {
   const payload = await req.text();
 
@@ -191,21 +263,7 @@ export async function POST(req: Request) {
                 .eq("email", email)
             : { data: [] as Array<{ id: string; cohort_id: string | null; role: string }> };
 
-          const metadataCohortId = parseString(u.public_metadata?.cohortId);
-          const metadataInviteRole = parseInviteRole(u.public_metadata?.inviteRole);
-
-          const invitesToProcess =
-            (pendingInvites?.length ?? 0) > 0
-              ? (pendingInvites ?? [])
-              : metadataCohortId
-                ? [
-                    {
-                      id: "metadata-fallback",
-                      cohort_id: metadataCohortId,
-                      role: metadataInviteRole,
-                    },
-                  ]
-                : [];
+          const invitesToProcess = pendingInvites ?? [];
 
           if (invitesToProcess.length > 0) {
             const cohortIds = [...new Set(
@@ -217,9 +275,9 @@ export async function POST(req: Request) {
             const { data: cohorts } = cohortIds.length
               ? await supabase
                   .from("cohorts")
-                  .select("id, company_id")
+                  .select("id, company_id, template_id")
                   .in("id", cohortIds)
-              : { data: [] as Array<{ id: string; company_id: string | null }> };
+              : { data: [] as Array<{ id: string; company_id: string | null; template_id: string | null }> };
 
             const corporationIds = [...new Set(
               (cohorts ?? [])
@@ -253,6 +311,13 @@ export async function POST(req: Request) {
 
               await upsertCorpMembership(supabase, profileId.data, corporationId);
               await upsertCohortMember(supabase, profileId.data, cohortId, inviteRole);
+              if (inviteRole === "user") {
+                await markAssessmentAccepted({
+                  supabase,
+                  userId: profileId.data,
+                  templateId: cohort.template_id ?? null,
+                });
+              }
 
               if (corporation?.org_id) {
                 const currentOrgRole = orgRoleById.get(corporation.org_id) ?? "user";

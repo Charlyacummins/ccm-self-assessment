@@ -15,7 +15,6 @@ import {
 import {
   Bell,
   Download,
-  Trash2,
   Users,
   Search,
   SlidersHorizontal,
@@ -37,24 +36,54 @@ function initials(name: string) {
 
 type Tab = "users" | "reviewers";
 
-export function ManageUsersTable({ cohortId }: { cohortId: string }) {
+export function ManageUsersTable({
+  cohortId,
+  settingsVersion = 0,
+}: {
+  cohortId: string;
+  settingsVersion?: number;
+}) {
   const [tab, setTab] = useState<Tab>("users");
   const [users, setUsers] = useState<CohortMemberRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reviewersEnabled, setReviewersEnabled] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (!cohortId) {
+      setReviewersEnabled(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    fetch(`/api/corp-admin/cohort-settings?cohortId=${cohortId}`, {
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((data) => setReviewersEnabled(Boolean(data?.reviewers_enabled)))
+      .catch(() => setReviewersEnabled(false));
+
+    return () => controller.abort();
+  }, [cohortId, settingsVersion]);
+
+  useEffect(() => {
+    if (!reviewersEnabled && tab === "reviewers") {
+      setTab("users");
+    }
+  }, [reviewersEnabled, tab]);
 
   useEffect(() => {
     if (!cohortId) return;
     setLoading(true);
     setSelected(new Set());
-    const role = tab === "reviewers" ? "reviewer" : "user";
+    const role = tab === "reviewers" && reviewersEnabled ? "reviewer" : "user";
     fetch(`/api/corp-admin/cohort-members?cohortId=${cohortId}&role=${role}`)
       .then((r) => r.json())
       .then((data) => setUsers(Array.isArray(data) ? data : []))
       .catch(() => setUsers([]))
       .finally(() => setLoading(false));
-  }, [cohortId, tab]);
+  }, [cohortId, tab, reviewersEnabled]);
 
   const allSelected = users.length > 0 && users.every((u) => selected.has(u.id));
 
@@ -82,13 +111,13 @@ export function ManageUsersTable({ cohortId }: { cohortId: string }) {
       <CardHeader className="pb-2">
         <div className="relative flex items-center justify-center">
           <Link
-            href={tab === "reviewers" ? "/corp-admin/reviewers" : "/corp-admin/users"}
+            href={reviewersEnabled && tab === "reviewers" ? "/corp-admin/reviewers" : "/corp-admin/users"}
             className="absolute left-0 text-muted-foreground hover:text-[#004070]"
           >
             <ExternalLink className="h-4 w-4" />
           </Link>
           <CardTitle className="text-base text-[#004070]">
-            {tab === "reviewers" ? "Manage Reviewers" : "Manage Users"}
+            {reviewersEnabled && tab === "reviewers" ? "Manage Reviewers" : "Manage Users"}
           </CardTitle>
           <div className="absolute right-0 inline-flex gap-1 rounded-lg bg-gray-100 p-1">
             <button
@@ -99,14 +128,16 @@ export function ManageUsersTable({ cohortId }: { cohortId: string }) {
             >
               Users
             </button>
-            <button
-              onClick={() => setTab("reviewers")}
-              className={`rounded-lg px-4 py-1.5 text-xs font-medium text-[#004070] transition-colors ${
-                tab === "reviewers" ? "bg-white shadow-sm" : "hover:bg-gray-200"
-              }`}
-            >
-              Reviewers
-            </button>
+            {reviewersEnabled ? (
+              <button
+                onClick={() => setTab("reviewers")}
+                className={`rounded-lg px-4 py-1.5 text-xs font-medium text-[#004070] transition-colors ${
+                  tab === "reviewers" ? "bg-white shadow-sm" : "hover:bg-gray-200"
+                }`}
+              >
+                Reviewers
+              </button>
+            ) : null}
           </div>
         </div>
       </CardHeader>
@@ -123,9 +154,6 @@ export function ManageUsersTable({ cohortId }: { cohortId: string }) {
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
           <Button variant="outline" size="sm" className="gap-1.5 border-gray-200 text-xs text-[#004070]">
-            <Trash2 className="h-3.5 w-3.5" /> Revoke
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 border-gray-200 text-xs text-[#004070]">
             <Users className="h-3.5 w-3.5" /> Group
           </Button>
           <div className="relative ml-auto">
@@ -138,7 +166,6 @@ export function ManageUsersTable({ cohortId }: { cohortId: string }) {
             />
           </div>
         </div>
-
         {/* Table */}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {loading ? (

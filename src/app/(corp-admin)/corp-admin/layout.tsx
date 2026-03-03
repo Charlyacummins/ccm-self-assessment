@@ -48,11 +48,19 @@ export default async function CorpAdminLayout({
   const activeCohort =
     (cohorts ?? []).find((cohort) => cohort.id === selectedCohortId) ?? (cohorts ?? [])[0] ?? null;
   const isPaymentBlocked = !!activeCohort && activeCohort.payment_status !== "paid";
+  const { data: cohortSettings } = activeCohort
+    ? await supabase
+        .from("cohort_settings")
+        .select("reviewers_enabled")
+        .eq("cohort_id", activeCohort.id)
+        .maybeSingle()
+    : { data: null as { reviewers_enabled: boolean } | null };
+  const reviewersEnabled = cohortSettings?.reviewers_enabled ?? false;
 
   return (
     <RoleProvider role={role}>
       <div className="flex min-h-screen flex-col">
-        <CorpAdminHeader />
+        <CorpAdminHeader reviewersEnabled={reviewersEnabled} />
         <main className="mx-auto w-full max-w-screen-2xl flex-1 px-6 py-8">
           {isPaymentBlocked ? (
             <div className="rounded-lg border border-[#004070]/20 bg-[#004070]/5 p-6">

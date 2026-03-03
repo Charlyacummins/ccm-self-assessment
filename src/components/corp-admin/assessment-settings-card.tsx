@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "lucide-react";
@@ -31,12 +32,19 @@ const DEFAULTS: CohortSettingsData = {
   reviewers_enabled: false,
 };
 
-export function AssessmentSettingsCard({ cohortId }: { cohortId: string }) {
+export function AssessmentSettingsCard({
+  cohortId,
+  onSaved,
+}: {
+  cohortId: string;
+  onSaved?: (settings: CohortSettingsData) => void;
+}) {
+  const router = useRouter();
   const [settings, setSettings] = useState<CohortSettingsData>(DEFAULTS);
   const [buySellGroupings, setBuySellGroupings] = useState(true);
   const [reminderDays, setReminderDays] = useState("30");
   const [saving, setSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!cohortId) return;
@@ -52,19 +60,22 @@ export function AssessmentSettingsCard({ cohortId }: { cohortId: string }) {
   const handleSave = async () => {
     if (!cohortId) return;
     setSaving(true);
-    setSaveStatus("idle");
+    setSaveStatus(null);
     try {
       const res = await fetch("/api/corp-admin/cohort-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cohortId, ...settings }),
       });
-      setSaveStatus(res.ok ? "saved" : "error");
+      if (!res.ok) throw new Error("Failed to save settings");
+      setSaveStatus("Settings saved.");
+      onSaved?.(settings);
+      router.refresh();
     } catch {
-      setSaveStatus("error");
+      setSaveStatus("Could not save settings.");
     } finally {
       setSaving(false);
-      setTimeout(() => setSaveStatus("idle"), 2000);
+      setTimeout(() => setSaveStatus(null), 2000);
     }
   };
 
@@ -134,8 +145,13 @@ export function AssessmentSettingsCard({ cohortId }: { cohortId: string }) {
           disabled={saving || !cohortId}
           className="w-full bg-[#004070] text-white hover:bg-[#003560] disabled:opacity-50"
         >
-          {saving ? "Saving…" : saveStatus === "saved" ? "Saved" : saveStatus === "error" ? "Error" : "Save"}
+          {saving ? "Saving..." : "Save"}
         </Button>
+        {saveStatus ? (
+          <p className={`text-xs ${saveStatus === "Settings saved." ? "text-muted-foreground" : "text-red-600"}`}>
+            {saveStatus}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );

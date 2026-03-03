@@ -28,6 +28,7 @@ export function ManageAssessmentsContent({
   const [selectedCohortId, setSelectedCohortId] = useState(
     initialCohortId
   );
+  const [settingsVersion, setSettingsVersion] = useState(0);
 
   const handleCohortChange = (cohortId: string) => {
     setSelectedCohortId(cohortId);
@@ -49,16 +50,20 @@ export function ManageAssessmentsContent({
           templateOptions={templateOptions}
           selectedCohortId={selectedCohortId}
           onCohortChange={handleCohortChange}
+          settingsVersion={settingsVersion}
         />
       </div>
 
       {/* Right column: Manage Users grows to fill, Settings/Invites pinned at bottom */}
       <div className="flex min-h-0 flex-col gap-6">
         <div className="min-h-0 flex-1">
-          <ManageUsersTable cohortId={selectedCohortId} />
+          <ManageUsersTable cohortId={selectedCohortId} settingsVersion={settingsVersion} />
         </div>
         <div className="grid flex-shrink-0 gap-6 lg:grid-cols-2">
-          <AssessmentSettingsCard cohortId={selectedCohortId} />
+          <AssessmentSettingsCard
+            cohortId={selectedCohortId}
+            onSaved={() => setSettingsVersion((prev) => prev + 1)}
+          />
           <InvitesCard />
         </div>
       </div>

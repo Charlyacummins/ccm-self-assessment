@@ -6,7 +6,7 @@ export type CohortMemberRow = {
   id: string;
   name: string;
   email: string;
-  assessmentStatus: "Completed" | "Active" | "Invited";
+  assessmentStatus: "Completed" | "Active" | "Invited" | "Accepted";
   group: string | null;
 };
 
@@ -52,12 +52,22 @@ export async function GET(req: Request) {
 
   const userIds = members.map((m) => m.user_id);
 
-  const [{ data: profiles }, { data: assessments }] = await Promise.all([
+  const [{ data: profiles }, { data: assessments }, { data: pendingInvites }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, email").in("id", userIds),
     supabase.from("assessments").select("user_id, status").in("user_id", userIds),
+    supabase
+      .from("pending_invites")
+      .select("email")
+      .eq("cohort_id", cohortId)
+      .eq("role", role),
   ]);
 
   const profileMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, p]));
+  const pendingInviteEmailSet = new Set(
+    (pendingInvites ?? [])
+      .map((invite) => invite.email?.trim().toLowerCase())
+      .filter((email): email is string => !!email)
+  );
 
   const assessmentStatusMap: Record<string, string> = {};
   for (const a of assessments ?? []) {
@@ -70,12 +80,21 @@ export async function GET(req: Request) {
   const rows: CohortMemberRow[] = members.map((m) => {
     const p = profileMap[m.user_id];
     const rawStatus = assessmentStatusMap[m.user_id];
+    const email = p?.email ?? "—";
+    const normalizedEmail = p?.email?.trim().toLowerCase() ?? "";
 
     let assessmentStatus: CohortMemberRow["assessmentStatus"];
     if (!rawStatus) {
-      assessmentStatus = "Invited";
+      assessmentStatus =
+        normalizedEmail && pendingInviteEmailSet.has(normalizedEmail)
+          ? "Invited"
+          : "Accepted";
     } else if (COMPLETED_STATUSES.includes(rawStatus)) {
       assessmentStatus = "Completed";
+    } else if (rawStatus === "accepted") {
+      assessmentStatus = "Accepted";
+    } else if (rawStatus === "invited") {
+      assessmentStatus = "Invited";
     } else {
       assessmentStatus = "Active";
     }
@@ -83,7 +102,7 @@ export async function GET(req: Request) {
     return {
       id: m.user_id,
       name: p?.full_name ?? "—",
-      email: p?.email ?? "—",
+      email,
       assessmentStatus,
       group: m.group_id ?? null,
     };

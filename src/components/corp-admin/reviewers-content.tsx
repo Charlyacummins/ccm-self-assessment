@@ -16,7 +16,6 @@ import {
 import {
   Bell,
   Download,
-  Trash2,
   Search,
   ArrowUpDown,
   Pencil,
@@ -104,7 +103,7 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
   };
 
   useEffect(() => {
-    loadReviewers();
+    void loadReviewers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cohortId]);
 
@@ -218,7 +217,6 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
       r.name.toLowerCase().includes(search.toLowerCase()) ||
       r.email.toLowerCase().includes(search.toLowerCase())
   );
-
   return (
     <div className="space-y-6">
       <Dialog open={resendModalOpen} onOpenChange={setResendModalOpen}>
@@ -269,9 +267,6 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5 border-gray-200 text-xs text-[#004070]">
               <Download className="h-3.5 w-3.5" /> Export
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 border-gray-200 text-xs text-[#004070]">
-              <Trash2 className="h-3.5 w-3.5" /> Revoke
             </Button>
             <div className="relative ml-auto">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />

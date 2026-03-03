@@ -19,12 +19,16 @@ const rostersDropdown = [
   { href: "/corp-admin/users", label: "Users" },
   { href: "/corp-admin/reviewers", label: "Reviewers" },
   { href: "/corp-admin/groups", label: "Groups" },
+  { href: "/corp-admin/pending-invitations", label: "Pending Invitations" },
 ];
 
-export function CorpAdminHeader() {
+export function CorpAdminHeader({ reviewersEnabled = false }: { reviewersEnabled?: boolean }) {
   const pathname = usePathname();
+  const filteredRostersDropdown = reviewersEnabled
+    ? rostersDropdown
+    : rostersDropdown.filter((item) => item.href !== "/corp-admin/reviewers");
 
-  const rostersActive = rostersDropdown.some(
+  const rostersActive = filteredRostersDropdown.some(
     (item) => pathname === item.href || pathname.startsWith(item.href + "/")
   );
 
@@ -56,7 +60,7 @@ export function CorpAdminHeader() {
                     <ChevronDown className="h-3.5 w-3.5 transition-transform group-hover:rotate-180" />
                   </button>
                   <div className="absolute left-0 top-full z-50 hidden min-w-[140px] overflow-hidden rounded-lg border bg-white shadow-md group-hover:block">
-                    {rostersDropdown.map((item) => {
+                    {filteredRostersDropdown.map((item) => {
                       const isItemActive = pathname === item.href || pathname.startsWith(item.href + "/");
                       return (
                         <Link

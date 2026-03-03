@@ -41,6 +41,8 @@ export default async function AssessmentStartPage() {
 
   // Resolve template_id
   let templateId = DEFAULT_TEMPLATE_ID;
+  let cohortStatus: string | null = null;
+  let hasCohortMembership = false;
   const { data: cohortMember } = await supabase
     .from("cohort_members")
     .select("cohort_id")
@@ -49,16 +51,21 @@ export default async function AssessmentStartPage() {
     .single();
 
   if (cohortMember) {
+    hasCohortMembership = true;
     const { data: cohort } = await supabase
       .from("cohorts")
-      .select("template_id")
+      .select("template_id, status")
       .eq("id", cohortMember.cohort_id)
       .single();
 
     if (cohort?.template_id) {
       templateId = cohort.template_id;
     }
+    cohortStatus = cohort?.status ?? null;
   }
+
+  const normalizedCohortStatus = cohortStatus?.trim().toLowerCase() ?? null;
+  if (hasCohortMembership && normalizedCohortStatus !== "active") redirect("/assessment");
 
   // Fetch all questions (template_skills) for this template with their response options
   const { data: skills } = await supabase
@@ -107,21 +114,35 @@ export default async function AssessmentStartPage() {
       })),
   }));
 
-  // Check for existing in-progress assessment
-  const { data: existingAssessment } = await supabase
+  // Check for existing active assessment lifecycle rows
+  const { data: assessmentRows } = await supabase
     .from("assessments")
-    .select("id")
+    .select("id, status")
     .eq("user_id", profile.id)
     .eq("template_id", templateId)
-    .eq("status", "in_progress")
+    .in("status", ["in_progress", "accepted", "invited"])
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
+
+  const existingAssessment =
+    (assessmentRows ?? []).find((row) => row.status === "in_progress") ??
+    (assessmentRows ?? []).find((row) => row.status === "accepted") ??
+    (assessmentRows ?? []).find((row) => row.status === "invited") ??
+    null;
 
   // Create or resume assessment
   let assessmentId: string;
   if (existingAssessment) {
     assessmentId = existingAssessment.id;
+    if (existingAssessment.status !== "in_progress") {
+      await supabase
+        .from("assessments")
+        .update({
+          status: "in_progress",
+          started_at: new Date().toISOString(),
+        })
+        .eq("id", existingAssessment.id);
+    }
   } else {
     const { data: newAssessment, error } = await supabase
       .from("assessments")

@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogTitle,
   DialogClose,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import type { CohortOverviewData } from "@/app/api/corp-admin/cohort-overview/route";
 import type { CohortCustomQuestionsData } from "@/app/api/corp-admin/cohort-custom-questions/route";
@@ -26,6 +27,15 @@ import {
   ChevronDown,
   ChevronsUpDown,
 } from "lucide-react";
+
+type CohortLifecycleStatus = "Draft" | "Active" | "Completed";
+
+function normalizeCohortStatus(status: string | null | undefined): CohortLifecycleStatus {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (normalized === "active") return "Active";
+  if (normalized === "completed" || normalized === "ended") return "Completed";
+  return "Draft";
+}
 
 // ─── Template selector ───────────────────────────────────────────────────────
 
@@ -153,10 +163,15 @@ function ExpandedContent({
   customQuestions,
   customQuestionsLoading,
   onOpenAddCustomQuestion,
+  onEditCustomQuestion,
   removedQuestions,
   removedQuestionsLoading,
   onRestoreQuestion,
   restoringQuestionId,
+  statusActionLabel,
+  onStatusAction,
+  statusActionLoading,
+  statusActionError,
 }: {
   template: string;
   onTemplateChange: (v: string) => void;
@@ -167,10 +182,15 @@ function ExpandedContent({
   customQuestions: CohortCustomQuestionsData["questions"];
   customQuestionsLoading: boolean;
   onOpenAddCustomQuestion: () => void;
+  onEditCustomQuestion: (question: CohortCustomQuestionsData["questions"][number]) => void;
   removedQuestions: CohortRemovedQuestionsData["questions"];
   removedQuestionsLoading: boolean;
   onRestoreQuestion: (templateSkillId: string) => void;
   restoringQuestionId: string | null;
+  statusActionLabel: string | null;
+  onStatusAction: () => void;
+  statusActionLoading: boolean;
+  statusActionError: string | null;
 }) {
   const reviewersEnabled = overview?.reviewersEnabled ?? false;
 
@@ -184,6 +204,21 @@ function ExpandedContent({
       {/* Overview */}
       <div className="mx-auto max-w-sm">
         <OverviewTable overview={overview} loading={overviewLoading} />
+        {statusActionLabel ? (
+          <div className="mt-3 space-y-2">
+            <Button
+              type="button"
+              onClick={onStatusAction}
+              disabled={statusActionLoading}
+              className="w-full bg-[#004070] text-white hover:bg-[#003560] disabled:opacity-50"
+            >
+              {statusActionLoading ? "Updating..." : statusActionLabel}
+            </Button>
+            {statusActionError ? (
+              <p className="text-xs text-red-500">{statusActionError}</p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {/* Question Set + Reviewers side by side */}
@@ -234,7 +269,12 @@ function ExpandedContent({
                           : "—"}
                       </p>
                     </div>
-                    <button className="shrink-0 text-[#00ABEB] hover:underline">Edit</button>
+                    <button
+                      onClick={() => onEditCustomQuestion(q)}
+                      className="shrink-0 text-[#00ABEB] hover:underline"
+                    >
+                      Edit
+                    </button>
                   </li>
                 ))
               )}
@@ -278,15 +318,6 @@ function ExpandedContent({
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex justify-end gap-3 pt-2">
-        <Button variant="outline" className="border-[#004070] px-8 text-[#004070] hover:bg-gray-50">
-          Save<br />Draft
-        </Button>
-        <Button className="bg-[#004070] px-8 text-white hover:bg-[#003560]">
-          Publish<br />Assessment
-        </Button>
-      </div>
     </div>
   );
 }
@@ -297,10 +328,12 @@ export function AssessmentTemplatesPanel({
   templateOptions = [],
   selectedCohortId,
   onCohortChange,
+  settingsVersion = 0,
 }: {
   templateOptions?: TemplateOption[];
   selectedCohortId: string;
   onCohortChange: (v: string) => void;
+  settingsVersion?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [questionSetOpen, setQuestionSetOpen] = useState(false);
@@ -312,14 +345,30 @@ export function AssessmentTemplatesPanel({
   const [customQuestions, setCustomQuestions] = useState<CohortCustomQuestionsData["questions"]>([]);
   const [customQuestionsLoading, setCustomQuestionsLoading] = useState(false);
   const [customQuestionModalOpen, setCustomQuestionModalOpen] = useState(false);
+  const [editCustomQuestionModalOpen, setEditCustomQuestionModalOpen] = useState(false);
+  const [editCustomQuestionId, setEditCustomQuestionId] = useState<string | null>(null);
   const [customQuestionError, setCustomQuestionError] = useState<string | null>(null);
   const [customQuestionSaving, setCustomQuestionSaving] = useState(false);
+  const [customQuestionDeleting, setCustomQuestionDeleting] = useState(false);
+  const [editCustomQuestionError, setEditCustomQuestionError] = useState<string | null>(null);
   const [questionRemovingId, setQuestionRemovingId] = useState<string | null>(null);
   const [questionRestoringId, setQuestionRestoringId] = useState<string | null>(null);
   const [questionActionError, setQuestionActionError] = useState<string | null>(null);
   const [removedQuestions, setRemovedQuestions] = useState<CohortRemovedQuestionsData["questions"]>([]);
   const [removedQuestionsLoading, setRemovedQuestionsLoading] = useState(false);
+  const [cohortStatusSaving, setCohortStatusSaving] = useState(false);
+  const [cohortStatusError, setCohortStatusError] = useState<string | null>(null);
+  const [confirmEndOpen, setConfirmEndOpen] = useState(false);
+  const [uncompletedInvitees, setUncompletedInvitees] = useState(0);
   const [newCustomQuestion, setNewCustomQuestion] = useState({
+    name: "",
+    questionText: "",
+    answerOptions: [
+      { responseText: "", pointValue: "0" },
+      { responseText: "", pointValue: "0" },
+    ],
+  });
+  const [editingCustomQuestion, setEditingCustomQuestion] = useState({
     name: "",
     questionText: "",
     answerOptions: [
@@ -329,6 +378,9 @@ export function AssessmentTemplatesPanel({
   });
 
   useEffect(() => {
+    setCohortStatusError(null);
+    setConfirmEndOpen(false);
+    setUncompletedInvitees(0);
     if (!selectedCohortId) {
       setOverview(null);
       return;
@@ -354,7 +406,7 @@ export function AssessmentTemplatesPanel({
       });
 
     return () => controller.abort();
-  }, [selectedCohortId]);
+  }, [selectedCohortId, settingsVersion]);
 
   useEffect(() => {
     if (!selectedCohortId) {
@@ -458,8 +510,43 @@ export function AssessmentTemplatesPanel({
     setCustomQuestionError(null);
   };
 
+  const resetEditCustomQuestionDraft = () => {
+    setEditCustomQuestionId(null);
+    setEditingCustomQuestion({
+      name: "",
+      questionText: "",
+      answerOptions: [
+        { responseText: "", pointValue: "0" },
+        { responseText: "", pointValue: "0" },
+      ],
+    });
+    setEditCustomQuestionError(null);
+  };
+
   const handleOpenAddCustomQuestion = () => {
     setCustomQuestionModalOpen(true);
+  };
+
+  const handleOpenEditCustomQuestion = (
+    question: CohortCustomQuestionsData["questions"][number]
+  ) => {
+    setEditCustomQuestionId(question.id);
+    setEditingCustomQuestion({
+      name: question.text ?? "",
+      questionText: question.description ?? "",
+      answerOptions:
+        question.answerOptions.length > 0
+          ? question.answerOptions.map((option) => ({
+              responseText: option.responseText,
+              pointValue: String(option.pointValue ?? 0),
+            }))
+          : [
+              { responseText: "", pointValue: "0" },
+              { responseText: "", pointValue: "0" },
+            ],
+    });
+    setEditCustomQuestionError(null);
+    setEditCustomQuestionModalOpen(true);
   };
 
   const refreshOverview = async () => {
@@ -552,6 +639,89 @@ export function AssessmentTemplatesPanel({
     }
   };
 
+  const handleUpdateCustomQuestion = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedCohortId || !editCustomQuestionId) return;
+
+    setCustomQuestionSaving(true);
+    setEditCustomQuestionError(null);
+    setQuestionActionError(null);
+
+    const responseOptions = editingCustomQuestion.answerOptions
+      .map((row) => ({
+        responseText: row.responseText.trim(),
+        pointValue: Number(row.pointValue),
+      }))
+      .filter((row) => row.responseText.length > 0);
+
+    try {
+      const res = await fetch("/api/corp-admin/cohort-custom-questions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cohortId: selectedCohortId,
+          customSkillId: editCustomQuestionId,
+          name: editingCustomQuestion.name.trim(),
+          questionText: editingCustomQuestion.questionText.trim(),
+          responseOptions,
+        }),
+      });
+      const payload = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "Failed to update custom question");
+
+      await Promise.all([
+        refreshCustomQuestions(),
+        refreshRemovedQuestions(),
+        refreshOverview(),
+        loadQuestionSet(),
+      ]);
+
+      setEditCustomQuestionModalOpen(false);
+      resetEditCustomQuestionDraft();
+    } catch (error) {
+      setEditCustomQuestionError(
+        error instanceof Error ? error.message : "Could not update custom question."
+      );
+    } finally {
+      setCustomQuestionSaving(false);
+    }
+  };
+
+  const handleDeleteCustomQuestion = async () => {
+    if (!selectedCohortId || !editCustomQuestionId) return;
+    setCustomQuestionDeleting(true);
+    setEditCustomQuestionError(null);
+    setQuestionActionError(null);
+    try {
+      const res = await fetch("/api/corp-admin/cohort-custom-questions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cohortId: selectedCohortId,
+          customSkillId: editCustomQuestionId,
+        }),
+      });
+      const payload = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "Failed to delete custom question");
+
+      await Promise.all([
+        refreshCustomQuestions(),
+        refreshRemovedQuestions(),
+        refreshOverview(),
+        loadQuestionSet(),
+      ]);
+
+      setEditCustomQuestionModalOpen(false);
+      resetEditCustomQuestionDraft();
+    } catch (error) {
+      setEditCustomQuestionError(
+        error instanceof Error ? error.message : "Could not delete custom question."
+      );
+    } finally {
+      setCustomQuestionDeleting(false);
+    }
+  };
+
   const handleRemoveExistingQuestion = async (templateSkillId: string) => {
     if (!selectedCohortId) return;
     setQuestionActionError(null);
@@ -600,6 +770,61 @@ export function AssessmentTemplatesPanel({
     }
   };
 
+  const updateCohortStatus = async (nextStatus: CohortLifecycleStatus, force = false) => {
+    if (!selectedCohortId) return;
+    setCohortStatusSaving(true);
+    setCohortStatusError(null);
+    try {
+      const res = await fetch("/api/corp-admin/cohort-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cohortId: selectedCohortId,
+          status: nextStatus,
+          force,
+        }),
+      });
+
+      const payload = (await res.json()) as {
+        error?: string;
+        needsConfirmation?: boolean;
+        uncompletedInvitees?: number;
+      };
+
+      if (!res.ok) {
+        if (
+          res.status === 409 &&
+          payload.needsConfirmation &&
+          nextStatus === "Completed" &&
+          !force
+        ) {
+          setUncompletedInvitees(payload.uncompletedInvitees ?? 0);
+          setConfirmEndOpen(true);
+          return;
+        }
+        throw new Error(payload.error ?? "Failed to update cohort status");
+      }
+
+      setConfirmEndOpen(false);
+      setUncompletedInvitees(0);
+      await refreshOverview();
+    } catch (error) {
+      setCohortStatusError(error instanceof Error ? error.message : "Could not update cohort status.");
+    } finally {
+      setCohortStatusSaving(false);
+    }
+  };
+
+  const currentStatus = overview ? normalizeCohortStatus(overview.status) : null;
+  const statusActionLabel =
+    !selectedCohortId || overviewLoading || !currentStatus
+      ? null
+      : currentStatus === "Draft"
+        ? "Make Active"
+        : currentStatus === "Active"
+          ? "End Cohort Test"
+          : null;
+
   const groupedQuestions = (questionSet?.questions ?? []).reduce<
     Array<{ groupName: string; items: CohortQuestionSetData["questions"] }>
   >((acc, q) => {
@@ -631,6 +856,23 @@ export function AssessmentTemplatesPanel({
           <TemplateSelector value={selectedCohortId} onChange={onCohortChange} options={templateOptions} />
 
           <OverviewTable overview={overview} loading={overviewLoading} />
+          {statusActionLabel ? (
+            <div className="space-y-2">
+              <Button
+                type="button"
+                onClick={() =>
+                  void updateCohortStatus(currentStatus === "Draft" ? "Active" : "Completed")
+                }
+                disabled={cohortStatusSaving || !selectedCohortId}
+                className="w-full bg-[#004070] text-white hover:bg-[#003560] disabled:opacity-50"
+              >
+                {cohortStatusSaving ? "Updating..." : statusActionLabel}
+              </Button>
+              {cohortStatusError ? (
+                <p className="text-xs text-red-500">{cohortStatusError}</p>
+              ) : null}
+            </div>
+          ) : null}
 
           <Separator />
 
@@ -683,7 +925,12 @@ export function AssessmentTemplatesPanel({
                             : "—"}
                         </p>
                       </div>
-                      <button className="shrink-0 text-[#00ABEB] hover:underline">Edit</button>
+                      <button
+                        onClick={() => handleOpenEditCustomQuestion(q)}
+                        className="shrink-0 text-[#00ABEB] hover:underline"
+                      >
+                        Edit
+                      </button>
                     </li>
                   ))
                 )}
@@ -755,11 +1002,54 @@ export function AssessmentTemplatesPanel({
             customQuestions={customQuestions}
             customQuestionsLoading={customQuestionsLoading}
             onOpenAddCustomQuestion={handleOpenAddCustomQuestion}
+            onEditCustomQuestion={handleOpenEditCustomQuestion}
             removedQuestions={removedQuestions}
             removedQuestionsLoading={removedQuestionsLoading}
             onRestoreQuestion={(templateSkillId) => void handleRestoreQuestion(templateSkillId)}
             restoringQuestionId={questionRestoringId}
+            statusActionLabel={statusActionLabel}
+            onStatusAction={() =>
+              void updateCohortStatus(currentStatus === "Draft" ? "Active" : "Completed")
+            }
+            statusActionLoading={cohortStatusSaving}
+            statusActionError={cohortStatusError}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmEndOpen} onOpenChange={setConfirmEndOpen}>
+        <DialogContent className="max-w-md">
+          <DialogTitle className="text-lg font-semibold text-[#004070]">
+            End Cohort Test?
+          </DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground">
+            {uncompletedInvitees > 0
+              ? `${uncompletedInvitees} invitee(s) still have uncompleted assessments.`
+              : "This will end the cohort test."}
+          </DialogDescription>
+          <div className="space-y-3">
+            <p className="text-sm text-[#004070]">
+              Ending this cohort will block additional assessment starts.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmEndOpen(false)}
+                className="border-[#004070] text-[#004070]"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void updateCohortStatus("Completed", true)}
+                disabled={cohortStatusSaving}
+                className="bg-[#004070] text-white hover:bg-[#003560] disabled:opacity-50"
+              >
+                {cohortStatusSaving ? "Ending..." : "End Test"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -827,6 +1117,141 @@ export function AssessmentTemplatesPanel({
               <p className="text-sm text-red-600">{questionActionError}</p>
             ) : null}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editCustomQuestionModalOpen}
+        onOpenChange={(open) => {
+          setEditCustomQuestionModalOpen(open);
+          if (!open) resetEditCustomQuestionDraft();
+        }}
+      >
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogTitle className="text-lg font-semibold text-[#004070]">
+            Edit Custom Question
+          </DialogTitle>
+
+          <form onSubmit={handleUpdateCustomQuestion} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[#534F4F]">Name</label>
+              <textarea
+                required
+                rows={2}
+                value={editingCustomQuestion.name}
+                onChange={(e) =>
+                  setEditingCustomQuestion((prev) => ({ ...prev, name: e.target.value }))
+                }
+                className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm text-[#004070] outline-none focus:ring-2 focus:ring-[#00ABEB]"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[#534F4F]">Question Text</label>
+              <textarea
+                required
+                rows={3}
+                value={editingCustomQuestion.questionText}
+                onChange={(e) =>
+                  setEditingCustomQuestion((prev) => ({
+                    ...prev,
+                    questionText: e.target.value,
+                  }))
+                }
+                className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm text-[#004070] outline-none focus:ring-2 focus:ring-[#00ABEB]"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[#534F4F]">Possible Answers</p>
+              <div className="space-y-2">
+                {editingCustomQuestion.answerOptions.map((option, idx) => (
+                  <div key={idx} className="grid gap-2 sm:grid-cols-[1fr_140px]">
+                    <Input
+                      value={option.responseText}
+                      onChange={(e) =>
+                        setEditingCustomQuestion((prev) => ({
+                          ...prev,
+                          answerOptions: prev.answerOptions.map((row, rowIndex) =>
+                            rowIndex === idx ? { ...row, responseText: e.target.value } : row
+                          ),
+                        }))
+                      }
+                      placeholder={`Answer option ${idx + 1}`}
+                      className="h-9"
+                    />
+                    <Input
+                      type="number"
+                      value={option.pointValue}
+                      onChange={(e) =>
+                        setEditingCustomQuestion((prev) => ({
+                          ...prev,
+                          answerOptions: prev.answerOptions.map((row, rowIndex) =>
+                            rowIndex === idx ? { ...row, pointValue: e.target.value } : row
+                          ),
+                        }))
+                      }
+                      placeholder="Points"
+                      className="h-9"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setEditingCustomQuestion((prev) => ({
+                      ...prev,
+                      answerOptions: [...prev.answerOptions, { responseText: "", pointValue: "0" }],
+                    }))
+                  }
+                  className="h-8 border-[#00ABEB] px-2 text-xs text-[#004070]"
+                >
+                  <Plus className="mr-1 h-3 w-3" />
+                  Add Answer
+                </Button>
+              </div>
+            </div>
+
+            {editCustomQuestionError ? (
+              <p className="text-xs text-red-600">{editCustomQuestionError}</p>
+            ) : null}
+
+            <div className="flex justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleDeleteCustomQuestion}
+                disabled={customQuestionDeleting || customQuestionSaving || !editCustomQuestionId}
+                className="border-red-300 text-red-600 hover:bg-red-50"
+              >
+                {customQuestionDeleting ? "Removing..." : "Remove Question"}
+              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditCustomQuestionModalOpen(false);
+                    resetEditCustomQuestionDraft();
+                  }}
+                  className="border-[#004070] text-[#004070]"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={customQuestionSaving || customQuestionDeleting}
+                  className="bg-[#004070] text-white hover:bg-[#003560]"
+                >
+                  {customQuestionSaving ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 

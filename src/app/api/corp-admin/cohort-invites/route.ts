@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 type InviteRole = "user" | "reviewer";
+type InviteRoleFilter = InviteRole | "all";
 const DEFAULT_INVITE_REDIRECT_URL = "https://ccm-self-assessment-staging.vercel.app/signup";
+const ACTIVE_ASSESSMENT_STATUSES = ["invited", "accepted", "in_progress"];
 
 type InviteResponseStatus =
   | "invited"
@@ -12,9 +14,21 @@ type InviteResponseStatus =
   | "already_member"
   | "added_member";
 
+export type PendingInviteRow = {
+  id: string;
+  email: string;
+  role: InviteRole;
+  invited_at: string | null;
+};
+
 function normalizeRole(value: unknown): InviteRole | null {
   if (value === "user" || value === "reviewer") return value;
   return null;
+}
+
+function normalizeRoleFilter(value: unknown): InviteRoleFilter {
+  if (value === "all") return "all";
+  return normalizeRole(value) ?? "user";
 }
 
 function normalizeEmail(value: unknown): string {
@@ -136,8 +150,132 @@ async function upsertResolvedMemberships(params: {
   if (insertCohortMemberError) throw new Error(insertCohortMemberError.message);
 }
 
+async function ensureInvitedAssessment(params: {
+  supabase: ReturnType<typeof db>;
+  profileId: string;
+  templateId: string | null;
+}) {
+  const { supabase, profileId, templateId } = params;
+  if (!templateId) return;
+
+  const { data: existing } = await supabase
+    .from("assessments")
+    .select("id")
+    .eq("user_id", profileId)
+    .eq("template_id", templateId)
+    .in("status", ACTIVE_ASSESSMENT_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) return;
+
+  const { error } = await supabase.from("assessments").insert({
+    user_id: profileId,
+    template_id: templateId,
+    status: "invited",
+  });
+  if (error) throw new Error(error.message);
+}
+
 function buildResponse(status: InviteResponseStatus, extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: true, status, ...extra });
+}
+
+export async function GET(req: Request) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const cohortId = searchParams.get("cohortId");
+  const roleFilter = normalizeRoleFilter(searchParams.get("role"));
+  if (!cohortId) return NextResponse.json({ error: "cohortId required" }, { status: 400 });
+
+  const supabase = db();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("clerk_user_id", userId)
+    .maybeSingle();
+
+  if (!profile) return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+
+  const { data: cohort } = await supabase
+    .from("cohorts")
+    .select("id")
+    .eq("id", cohortId)
+    .eq("admin_id", profile.id)
+    .maybeSingle();
+
+  if (!cohort) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  let query = supabase
+    .from("pending_invites")
+    .select("id, email, role, invited_at")
+    .eq("cohort_id", cohortId)
+    .order("invited_at", { ascending: false });
+  if (roleFilter !== "all") {
+    query = query.eq("role", roleFilter);
+  }
+  const { data: pendingInvites, error } = await query;
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json((pendingInvites ?? []) satisfies PendingInviteRow[]);
+}
+
+export async function PATCH(req: Request) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await req.json();
+  const cohortId = typeof body?.cohortId === "string" ? body.cohortId : "";
+  const inviteId = typeof body?.inviteId === "string" ? body.inviteId : "";
+  const email = normalizeEmail(body?.email);
+  const role = normalizeRole(body?.role);
+
+  if (!cohortId || !inviteId || !email || !role) {
+    return NextResponse.json(
+      { error: "cohortId, inviteId, email, and role are required" },
+      { status: 400 }
+    );
+  }
+
+  if (!isValidEmail(email)) {
+    return NextResponse.json({ error: "A valid email is required" }, { status: 400 });
+  }
+
+  const supabase = db();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("clerk_user_id", userId)
+    .maybeSingle();
+
+  if (!profile) return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+
+  const { data: cohort } = await supabase
+    .from("cohorts")
+    .select("id")
+    .eq("id", cohortId)
+    .eq("admin_id", profile.id)
+    .maybeSingle();
+
+  if (!cohort) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const { error } = await supabase
+    .from("pending_invites")
+    .update({
+      email,
+      role,
+      invited_at: new Date().toISOString(),
+    })
+    .eq("id", inviteId)
+    .eq("cohort_id", cohortId);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true });
 }
 
 export async function POST(req: Request) {
@@ -177,7 +315,7 @@ export async function POST(req: Request) {
 
   const { data: cohort } = await supabase
     .from("cohorts")
-    .select("id, admin_id, company_id, payment_status")
+    .select("id, admin_id, company_id, payment_status, template_id")
     .eq("id", cohortId)
     .eq("admin_id", profile.id)
     .maybeSingle();
@@ -253,6 +391,14 @@ export async function POST(req: Request) {
       .delete()
       .eq("email", email)
       .eq("cohort_id", cohortId);
+
+    if (role === "user") {
+      await ensureInvitedAssessment({
+        supabase,
+        profileId: inviteeProfile.id,
+        templateId: cohort.template_id ?? null,
+      });
+    }
 
     return buildResponse("added_member");
   }

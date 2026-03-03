@@ -22,6 +22,8 @@ export default async function AssessmentPage() {
 
   // Resolve template_id from cohort or default
   let templateId = DEFAULT_TEMPLATE_ID;
+  let cohortStatus: string | null = null;
+  let hasCohortMembership = false;
   if (profile) {
     const { data: cohortMember } = await supabase
       .from("cohort_members")
@@ -31,17 +33,22 @@ export default async function AssessmentPage() {
       .single();
 
     if (cohortMember) {
+      hasCohortMembership = true;
       const { data: cohort } = await supabase
         .from("cohorts")
-        .select("template_id")
+        .select("template_id, status")
         .eq("id", cohortMember.cohort_id)
         .single();
 
       if (cohort?.template_id) {
         templateId = cohort.template_id;
       }
+      cohortStatus = cohort?.status ?? null;
     }
   }
+
+  const normalizedCohortStatus = cohortStatus?.trim().toLowerCase() ?? null;
+  const isStartBlocked = hasCohortMembership && normalizedCohortStatus !== "active";
 
   // Fetch question count (skills linked via meta_json.template_ids) and section count
   const { count: questionCount } = await supabase
@@ -100,13 +107,19 @@ export default async function AssessmentPage() {
             <h2 className="text-lg font-semibold text-[#004070]">
               Start Assessment
             </h2>
-            <Button
-              asChild
-              variant="outline"
-              className="mt-4 w-32 border-[#00ABEB] text-[#004070] hover:bg-[#00ABEB]/10"
-            >
-              <Link href="/assessment/start">Start</Link>
-            </Button>
+            {isStartBlocked ? (
+              <p className="mx-auto mt-4 max-w-xs text-sm text-[#004070]">
+                come back to this page when your administrator makes your assessment available
+              </p>
+            ) : (
+              <Button
+                asChild
+                variant="outline"
+                className="mt-4 w-32 border-[#00ABEB] text-[#004070] hover:bg-[#00ABEB]/10"
+              >
+                <Link href="/assessment/start">Start</Link>
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
