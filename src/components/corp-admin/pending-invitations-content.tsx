@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronDown, ChevronsUpDown, Bell, Trash2, Pencil } from "lucide-react";
+import { ChevronDown, ChevronsUpDown, Trash2, Pencil } from "lucide-react";
 import type { TemplateOption } from "./manage-assessments-content";
 
 type PendingInviteRow = {
@@ -65,9 +65,6 @@ export function PendingInvitationsContent({ templateOptions }: { templateOptions
   const [editEmail, setEditEmail] = useState("");
   const [editRole, setEditRole] = useState<"user" | "reviewer">("user");
 
-  const selectedOption = templateOptions.find((option) => option.value === cohortId);
-  const corporationId = selectedOption?.corporationId ?? "";
-
   const loadRows = async () => {
     if (!cohortId) return;
     setLoading(true);
@@ -96,35 +93,6 @@ export function PendingInvitationsContent({ templateOptions }: { templateOptions
       }),
     [rows]
   );
-
-  const handleSendReminder = async (row: PendingInviteRow) => {
-    if (!cohortId || !corporationId) return;
-    setStatusMessage(null);
-    setActionId(row.id);
-    try {
-      const fallbackName = row.email.split("@")[0] || "Invitee";
-      const res = await fetch("/api/corp-admin/cohort-invites", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cohortId,
-          corporationId,
-          email: row.email,
-          name: fallbackName,
-          role: row.role,
-          resend: true,
-        }),
-      });
-      const payload = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(payload.error ?? "Failed to send reminder");
-      setStatusMessage("Reminder sent.");
-      await loadRows();
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to send reminder.");
-    } finally {
-      setActionId(null);
-    }
-  };
 
   const handleRevoke = async (row: PendingInviteRow) => {
     if (!cohortId) return;
@@ -258,17 +226,6 @@ export function PendingInvitationsContent({ templateOptions }: { templateOptions
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void handleSendReminder(row)}
-                          disabled={actionId === row.id}
-                          className="gap-1.5 border-gray-200 text-xs text-[#004070]"
-                        >
-                          <Bell className="h-3.5 w-3.5" />
-                          Reminder
-                        </Button>
                         <Button
                           type="button"
                           variant="outline"

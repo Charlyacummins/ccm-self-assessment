@@ -24,6 +24,8 @@ interface CorpResultsPageProps {
   skillGroupResults: SkillGroupResult[];
   skillScores: SkillScore[];
   feedbackText: string;
+  emptyResultsMessage?: string;
+  emptyFeedbackMessage?: string;
 }
 
 const GROUP_DEMOGRAPHIC = [
@@ -38,6 +40,8 @@ export function CorpResultsPage({
   skillGroupResults,
   skillScores,
   feedbackText,
+  emptyResultsMessage,
+  emptyFeedbackMessage,
 }: CorpResultsPageProps) {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -91,6 +95,7 @@ export function CorpResultsPage({
         benchmarks={benchmarks}
         reviewerScores={reviewerScores}
         showReviewerScores={showReviewerScores}
+        emptyStateMessage={emptyResultsMessage}
         keyBarSlot={
           <CorpChartKeyBar
             benchmarkType={benchmarkType}
@@ -115,6 +120,7 @@ export function CorpResultsPage({
         feedbackText={feedbackText}
         benchmarks={benchmarks}
         benchmarksLoading={benchmarksLoading}
+        emptyStateMessage={emptyFeedbackMessage}
       />
 
       <ResultsSkillSidebar

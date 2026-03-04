@@ -46,7 +46,14 @@ export async function GET(req: Request) {
     .limit(1)
     .maybeSingle();
 
-  if (!cohortMember) {
+  const { data: cohortAdmin } = await supabase
+    .from("cohorts")
+    .select("id")
+    .eq("id", cohortId)
+    .eq("admin_id", profile.id)
+    .maybeSingle();
+
+  if (!cohortMember && !cohortAdmin) {
     return NextResponse.json(
       { error: "Forbidden: cohort access denied" },
       { status: 403 }

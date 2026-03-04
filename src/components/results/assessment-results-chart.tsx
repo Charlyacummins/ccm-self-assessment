@@ -55,6 +55,7 @@ export function AssessmentResultsChart({
   keyBarSlot,
   reviewerScores,
   showReviewerScores,
+  emptyStateMessage,
 }: {
   skillGroups: SkillGroupResult[];
   templateId: string;
@@ -65,6 +66,7 @@ export function AssessmentResultsChart({
   keyBarSlot?: React.ReactNode;
   reviewerScores?: Record<string, number>;
   showReviewerScores?: boolean;
+  emptyStateMessage?: string;
 }) {
   if (!hasResults) {
     return (
@@ -74,7 +76,7 @@ export function AssessmentResultsChart({
             Assessment Results
           </h2>
           <div className="mt-6 flex h-48 items-center justify-center text-sm text-muted-foreground">
-            Complete your first assessment to see your results here.
+            {emptyStateMessage ?? "Complete your first assessment to see your results here."}
           </div>
         </CardContent>
       </Card>

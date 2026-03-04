@@ -51,16 +51,17 @@ export default async function CorpAdminLayout({
   const { data: cohortSettings } = activeCohort
     ? await supabase
         .from("cohort_settings")
-        .select("reviewers_enabled")
+        .select("reviewers_enabled, grouping_enabled")
         .eq("cohort_id", activeCohort.id)
         .maybeSingle()
-    : { data: null as { reviewers_enabled: boolean } | null };
+    : { data: null as { reviewers_enabled: boolean; grouping_enabled: boolean } | null };
   const reviewersEnabled = cohortSettings?.reviewers_enabled ?? false;
+  const groupingEnabled = cohortSettings?.grouping_enabled ?? false;
 
   return (
     <RoleProvider role={role}>
       <div className="flex min-h-screen flex-col">
-        <CorpAdminHeader reviewersEnabled={reviewersEnabled} />
+        <CorpAdminHeader reviewersEnabled={reviewersEnabled} groupingEnabled={groupingEnabled} />
         <main className="mx-auto w-full max-w-screen-2xl flex-1 px-6 py-8">
           {isPaymentBlocked ? (
             <div className="rounded-lg border border-[#004070]/20 bg-[#004070]/5 p-6">

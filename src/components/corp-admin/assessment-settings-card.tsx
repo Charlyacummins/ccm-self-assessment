@@ -30,6 +30,7 @@ const DEFAULTS: CohortSettingsData = {
   individual_result_visibility: false,
   reminders_enabled: false,
   reviewers_enabled: false,
+  grouping_enabled: false,
 };
 
 export function AssessmentSettingsCard({
@@ -41,7 +42,6 @@ export function AssessmentSettingsCard({
 }) {
   const router = useRouter();
   const [settings, setSettings] = useState<CohortSettingsData>(DEFAULTS);
-  const [buySellGroupings, setBuySellGroupings] = useState(true);
   const [reminderDays, setReminderDays] = useState("30");
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -103,7 +103,7 @@ export function AssessmentSettingsCard({
           <div className="space-y-2">
             <p className="text-xs font-semibold text-[#004070]">Groups</p>
             <p className="text-xs text-muted-foreground">Buy/Sell Side Groupings</p>
-            <Toggle checked={buySellGroupings} onChange={() => setBuySellGroupings(!buySellGroupings)} />
+            <Toggle checked={settings.grouping_enabled} onChange={() => toggle("grouping_enabled")} />
           </div>
         </div>
 

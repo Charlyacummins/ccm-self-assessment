@@ -52,7 +52,7 @@ export async function getCorpTemplateOptions(): Promise<TemplateOption[]> {
   return validCohorts.map((c) => {
     const title = titleById[c.template_id] ?? "Unknown Template";
     const cohortName = c.name?.trim() || `Cohort ${new Date(c.created_at).getFullYear()}`;
-    const label = `${title} - ${cohortName}`;
+    const label = `${cohortName} - ${title}`;
     return { value: c.id, label, corporationId: c.company_id };
   });
 }

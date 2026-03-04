@@ -6,6 +6,7 @@ export type CohortSettingsData = {
   individual_result_visibility: boolean;
   reminders_enabled: boolean;
   reviewers_enabled: boolean;
+  grouping_enabled: boolean;
 };
 
 async function resolveAdminProfile(userId: string) {
@@ -49,7 +50,7 @@ export async function GET(req: Request) {
 
   const { data } = await supabase
     .from("cohort_settings")
-    .select("individual_result_visibility, reminders_enabled, reviewers_enabled")
+    .select("individual_result_visibility, reminders_enabled, reviewers_enabled, grouping_enabled")
     .eq("cohort_id", cohortId)
     .maybeSingle();
 
@@ -58,6 +59,7 @@ export async function GET(req: Request) {
     individual_result_visibility: data?.individual_result_visibility ?? false,
     reminders_enabled: data?.reminders_enabled ?? false,
     reviewers_enabled: data?.reviewers_enabled ?? false,
+    grouping_enabled: data?.grouping_enabled ?? false,
   };
 
   return NextResponse.json(settings);
@@ -68,7 +70,7 @@ export async function PATCH(req: Request) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { cohortId, individual_result_visibility, reminders_enabled, reviewers_enabled } =
+  const { cohortId, individual_result_visibility, reminders_enabled, reviewers_enabled, grouping_enabled } =
     body ?? {};
 
   if (!cohortId) return NextResponse.json({ error: "cohortId required" }, { status: 400 });
@@ -86,6 +88,7 @@ export async function PATCH(req: Request) {
       individual_result_visibility,
       reminders_enabled,
       reviewers_enabled,
+      grouping_enabled,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "cohort_id" }

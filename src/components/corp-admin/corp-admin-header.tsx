@@ -9,7 +9,7 @@ import { ChevronDown } from "lucide-react";
 const navLinks = [
   { href: "/corp-admin/dashboard", label: "Dashboard", dropdown: true },
   { href: "/corp-admin/manage-assessments", label: "Manage Assessments", dropdown: false },
-  { href: null, label: "Results", dropdown: false },
+  { href: "/corp-admin/results", label: "Results", dropdown: false },
   { href: null, label: "ROSTERS_DROPDOWN", dropdown: false },
   { href: null, label: "Support", dropdown: true },
   { href: null, label: "Account", dropdown: true },
@@ -22,11 +22,19 @@ const rostersDropdown = [
   { href: "/corp-admin/pending-invitations", label: "Pending Invitations" },
 ];
 
-export function CorpAdminHeader({ reviewersEnabled = false }: { reviewersEnabled?: boolean }) {
+export function CorpAdminHeader({
+  reviewersEnabled = false,
+  groupingEnabled = false,
+}: {
+  reviewersEnabled?: boolean;
+  groupingEnabled?: boolean;
+}) {
   const pathname = usePathname();
-  const filteredRostersDropdown = reviewersEnabled
-    ? rostersDropdown
-    : rostersDropdown.filter((item) => item.href !== "/corp-admin/reviewers");
+  const filteredRostersDropdown = rostersDropdown.filter((item) => {
+    if (!reviewersEnabled && item.href === "/corp-admin/reviewers") return false;
+    if (!groupingEnabled && item.href === "/corp-admin/groups") return false;
+    return true;
+  });
 
   const rostersActive = filteredRostersDropdown.some(
     (item) => pathname === item.href || pathname.startsWith(item.href + "/")

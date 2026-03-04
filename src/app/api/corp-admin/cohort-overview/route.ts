@@ -8,6 +8,7 @@ export type CohortOverviewData = {
   timeLabel: string;
   status: string | null;
   invitees: number;
+  seatCount: number;
   reviewersEnabled: boolean;
 };
 
@@ -36,7 +37,7 @@ export async function GET(req: Request) {
 
   const { data: cohort } = await supabase
     .from("cohorts")
-    .select("id, template_id, status, seats_used")
+    .select("id, template_id, status, seats_used, seat_count")
     .eq("id", cohortId)
     .eq("admin_id", profile.id)
     .maybeSingle();
@@ -72,6 +73,7 @@ export async function GET(req: Request) {
       .filter((id): id is string => typeof id === "string" && id.length > 0)
   ).size;
   const invitees = Number(cohort.seats_used ?? 0);
+  const seatCount = Number(cohort.seat_count ?? 0);
 
   const payload: CohortOverviewData = {
     questions,
@@ -79,6 +81,7 @@ export async function GET(req: Request) {
     timeLabel: formatTimeLabel(questions),
     status: cohort.status ?? null,
     invitees,
+    seatCount,
     reviewersEnabled: settingsResult.data?.reviewers_enabled ?? false,
   };
 

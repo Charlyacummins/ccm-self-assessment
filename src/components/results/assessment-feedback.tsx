@@ -37,6 +37,7 @@ export function AssessmentFeedback({
   feedbackText,
   benchmarks,
   benchmarksLoading = false,
+  emptyStateMessage,
 }: {
   hasResults: boolean;
   skillGroups: SkillGroupResult[];
@@ -45,6 +46,7 @@ export function AssessmentFeedback({
   feedbackText: string;
   benchmarks: Record<string, BenchmarkData>;
   benchmarksLoading?: boolean;
+  emptyStateMessage?: string;
 }) {
   if (benchmarksLoading && hasResults) {
     return (
@@ -93,7 +95,8 @@ export function AssessmentFeedback({
 
         {!hasResults ? (
           <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-            Complete your first assessment to see feedback here.
+            {emptyStateMessage ??
+              "Complete your first assessment to see feedback here."}
           </div>
         ) : (
           <div className="grid gap-6 md:grid-cols-2">
