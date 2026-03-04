@@ -336,16 +336,14 @@ export async function PATCH(req: Request) {
   if (groupError) return NextResponse.json({ error: groupError.message }, { status: 500 });
   if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
-  let query = supabase
+  const updateBase = supabase
     .from("cohort_members")
     .update({ group_id: groupId })
     .eq("cohort_id", cohortId)
-    .in("user_id", memberUserIds)
-    .select("user_id");
+    .in("user_id", memberUserIds);
 
-  if (role) query = query.eq("role", role);
-
-  const { data: updatedMembers, error: updateError } = await query;
+  const updateQuery = role ? updateBase.eq("role", role) : updateBase;
+  const { data: updatedMembers, error: updateError } = await updateQuery.select("user_id");
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
   return NextResponse.json({
