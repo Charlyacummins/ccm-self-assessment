@@ -13,15 +13,8 @@ import {
 } from "@/components/ui/table";
 
 const DEFAULT_TEMPLATE_ID = "c9bd8551-b8f4-4255-b2b7-c1b86f18907d";
-
-interface AssessmentRow {
-  id: string;
-  user_id: string;
-  template_id: string;
-  status: string;
-  submitted_at: string | null;
-  started_at: string | null;
-}
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 interface ReviewRow {
   id: string;
@@ -64,41 +57,12 @@ export default async function ReviewerDashboardPage() {
     return null;
   }
 
-  const { data: reviewerMemberships } = await supabase
-    .from("org_memberships")
-    .select("org_id")
-    .eq("user_id", reviewerProfile.id)
-    .eq("role", "reviewer");
-
-  const orgIds = (reviewerMemberships ?? []).map((m) => m.org_id);
-
-  const { data: organization } = orgIds.length
-    ? await supabase
-        .from("organizations")
-        .select("slug")
-        .in("id", orgIds)
-        .limit(1)
-        .maybeSingle()
-    : { data: null };
-
-  const { data: orgUsers } = orgIds.length
-    ? await supabase
-        .from("org_memberships")
-        .select("user_id")
-        .in("org_id", orgIds)
-    : { data: [] as { user_id: string }[] };
-
-  const orgUserIds = [...new Set((orgUsers ?? []).map((u) => u.user_id))]
-    .filter((id) => id !== reviewerProfile.id);
-
-  const { data: assessments } = orgUserIds.length
-    ? await supabase
-        .from("assessments")
-        .select("id, user_id, template_id, status, submitted_at, started_at")
-        .in("user_id", orgUserIds)
-        .in("status", ["submitted", "in_review", "reviewed", "completed"])
-        .order("submitted_at", { ascending: false, nullsFirst: false })
-    : { data: [] as AssessmentRow[] };
+  const { data: assessments } = await supabase
+    .from("assessments")
+    .select("id, user_id, template_id, status, submitted_at, started_at, created_at")
+    .eq("reviewed_by", reviewerProfile.id)
+    .in("status", ["submitted", "in_review", "reviewed", "completed"])
+    .order("submitted_at", { ascending: false, nullsFirst: false });
 
   const inviteeIds = [...new Set((assessments ?? []).map((a) => a.user_id))];
   const { data: inviteeProfiles } = inviteeIds.length
@@ -118,14 +82,15 @@ export default async function ReviewerDashboardPage() {
   const profileById = new Map((inviteeProfiles ?? []).map((p) => [p.id, p]));
   const functionById = new Map((inviteeDimensions ?? []).map((d) => [d.user_id, d.functional_area]));
 
-  const pendingCount = (assessments ?? []).filter((a) => a.status === "submitted").length;
+  const pendingCount = (assessments ?? []).filter((a) => ["submitted", "in_review"].includes(a.status)).length;
   const completedCount = (assessments ?? []).filter((a) => ["reviewed", "completed"].includes(a.status)).length;
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const recentActivityCount = (assessments ?? []).filter((a) => {
-    if (!a.submitted_at) return false;
-    return new Date(a.submitted_at) >= sevenDaysAgo;
+    const activityAt = a.submitted_at ?? a.started_at ?? a.created_at;
+    if (!activityAt) return false;
+    return new Date(activityAt) >= sevenDaysAgo;
   }).length;
 
   const primaryTemplateId = (assessments ?? [])[0]?.template_id ?? DEFAULT_TEMPLATE_ID;
@@ -163,7 +128,7 @@ export default async function ReviewerDashboardPage() {
     };
   });
 
-  const orgDisplayName = organization?.slug?.toUpperCase() || "YOUR ORGANIZATION";
+  const orgDisplayName = "YOUR ASSIGNED INVITEES";
   const overviewCards = [
     {
       title: "Pending Reviews",

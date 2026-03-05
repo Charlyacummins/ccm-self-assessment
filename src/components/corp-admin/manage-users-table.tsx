@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,8 +65,30 @@ export function ManageUsersTable({
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editGroupId, setEditGroupId] = useState("");
+  const [rosterUsers, setRosterUsers] = useState<CohortMemberRow[]>([]);
+  const [editReviewerUserIds, setEditReviewerUserIds] = useState<string[]>([]);
+  const [editRosterSearch, setEditRosterSearch] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [groupOptions, setGroupOptions] = useState<GroupOption[]>([]);
+  const reviewersTabActive = tab === "reviewers" && reviewersEnabled;
+  const showGroupControls = groupingEnabled && !reviewersTabActive;
+
+  const fetchRosterUsers = useCallback(async () => {
+    if (!cohortId) {
+      setRosterUsers([]);
+      return [] as CohortMemberRow[];
+    }
+    try {
+      const res = await fetch(`/api/corp-admin/cohort-members?cohortId=${cohortId}&role=user`);
+      const data = await res.json();
+      const rows = Array.isArray(data) ? (data as CohortMemberRow[]) : [];
+      setRosterUsers(rows);
+      return rows;
+    } catch {
+      setRosterUsers([]);
+      return [] as CohortMemberRow[];
+    }
+  }, [cohortId]);
 
   const loadUsers = async () => {
     if (!cohortId) return;
@@ -158,6 +180,21 @@ export function ManageUsersTable({
       });
   }, [cohortId]);
 
+  useEffect(() => {
+    void fetchRosterUsers();
+  }, [fetchRosterUsers]);
+
+  const assignedUserIdsByReviewer = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const rosterUser of rosterUsers) {
+      if (!rosterUser.reviewerId) continue;
+      const current = map.get(rosterUser.reviewerId) ?? [];
+      current.push(rosterUser.id);
+      map.set(rosterUser.reviewerId, current);
+    }
+    return map;
+  }, [rosterUsers]);
+
   const allSelected = users.length > 0 && users.every((u) => selected.has(u.id));
 
   const toggleAll = () => {
@@ -179,21 +216,21 @@ export function ManageUsersTable({
       u.email.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "all" || u.assessmentStatus === statusFilter;
     const matchesGroup =
-      !groupingEnabled ||
+      !showGroupControls ||
       groupFilter === "all" ||
       (groupFilter === "grouped" ? !!u.group : !u.group);
     return matchesSearch && matchesStatus && matchesGroup;
   });
 
-  const hasActiveFilters = statusFilter !== "all" || (groupingEnabled && groupFilter !== "all");
+  const hasActiveFilters = statusFilter !== "all" || (showGroupControls && groupFilter !== "all");
 
   const handleExport = () => {
     const rows: Array<Array<string>> = [
-      groupingEnabled
+      showGroupControls
         ? ["Name", "Email", "Assessment Status", "Group"]
         : ["Name", "Email", "Assessment Status"],
       ...filtered.map((user) =>
-        groupingEnabled
+        showGroupControls
           ? [user.name, user.email, user.assessmentStatus, user.group ?? ""]
           : [user.name, user.email, user.assessmentStatus]
       ),
@@ -205,11 +242,19 @@ export function ManageUsersTable({
     );
   };
 
-  const openEditModal = (user: CohortMemberRow) => {
+  const openEditModal = async (user: CohortMemberRow) => {
     setEditUserId(user.id);
     setEditName(user.name === "—" ? "" : user.name);
     setEditEmail(user.email === "—" ? "" : user.email);
     setEditGroupId(user.groupId ?? "");
+    setEditReviewerUserIds(assignedUserIdsByReviewer.get(user.id) ?? []);
+    setEditRosterSearch("");
+    if (reviewersTabActive) {
+      const latestRoster = await fetchRosterUsers();
+      setEditReviewerUserIds(
+        latestRoster.filter((row) => row.reviewerId === user.id).map((row) => row.id)
+      );
+    }
     setEditOpen(true);
   };
 
@@ -228,7 +273,8 @@ export function ManageUsersTable({
           role: currentRole,
           name: editName.trim(),
           email: editEmail.trim().toLowerCase(),
-          groupId: groupingEnabled ? (editGroupId || null) : null,
+          groupId: showGroupControls ? (editGroupId || null) : null,
+          reviewerUserIds: reviewersTabActive ? editReviewerUserIds : undefined,
         }),
       });
       const payload = (await res.json()) as { error?: string };
@@ -241,6 +287,21 @@ export function ManageUsersTable({
     } finally {
       setEditSaving(false);
     }
+  };
+
+  const filteredRosterUsers = rosterUsers.filter((user) => {
+    const query = editRosterSearch.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      user.name.toLowerCase().includes(query) ||
+      user.email.toLowerCase().includes(query)
+    );
+  });
+
+  const toggleRosterUser = (userId: string) => {
+    setEditReviewerUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
   };
 
   return (
@@ -263,7 +324,7 @@ export function ManageUsersTable({
                 <option value="Completed">Completed</option>
               </select>
             </div>
-            {groupingEnabled ? (
+            {showGroupControls ? (
               <div className="space-y-1">
                 <label className="text-xs font-medium text-[#004070]">Group</label>
                 <select
@@ -283,7 +344,7 @@ export function ManageUsersTable({
                 variant="outline"
                 onClick={() => {
                   setStatusFilter("all");
-                  if (groupingEnabled) setGroupFilter("all");
+                  if (showGroupControls) setGroupFilter("all");
                 }}
               >
                 Reset
@@ -313,7 +374,7 @@ export function ManageUsersTable({
               <label className="text-xs font-medium text-[#004070]">Email</label>
               <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="text-xs" />
             </div>
-            {groupingEnabled ? (
+            {showGroupControls ? (
               <div className="space-y-1">
                 <label className="text-xs font-medium text-[#004070]">Group</label>
                 <select
@@ -328,6 +389,45 @@ export function ManageUsersTable({
                     </option>
                   ))}
                 </select>
+              </div>
+            ) : null}
+            {reviewersTabActive ? (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-[#004070]">
+                  Assigned Invitees ({editReviewerUserIds.length})
+                </label>
+                <Input
+                  placeholder="Search invitees"
+                  value={editRosterSearch}
+                  onChange={(e) => setEditRosterSearch(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <div className="max-h-44 overflow-y-auto rounded-md border border-input p-2">
+                  {filteredRosterUsers.length === 0 ? (
+                    <p className="py-3 text-center text-xs text-muted-foreground">
+                      No invitees found.
+                    </p>
+                  ) : (
+                    <div className="space-y-1">
+                      {filteredRosterUsers.map((user) => (
+                        <label
+                          key={user.id}
+                          className="flex cursor-pointer items-center justify-between rounded px-2 py-1.5 hover:bg-gray-50"
+                        >
+                          <span className="truncate pr-3 text-xs text-[#004070]">
+                            {user.name} <span className="text-muted-foreground">({user.email})</span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={editReviewerUserIds.includes(user.id)}
+                            onChange={() => toggleRosterUser(user.id)}
+                            className="h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-[#004070]"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : null}
             <div className="flex justify-end gap-2 pt-1">
@@ -399,7 +499,7 @@ export function ManageUsersTable({
           >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
-          {groupingEnabled ? (
+          {showGroupControls ? (
             <AssignGroupDialog
               cohortId={cohortId}
               selectedUserIds={[...selected]}
@@ -454,7 +554,7 @@ export function ManageUsersTable({
                     </span>
                   </TableHead>
                   <TableHead className="text-xs font-medium text-[#004070]">Assessment Status</TableHead>
-                  {groupingEnabled ? (
+                  {showGroupControls ? (
                     <TableHead className="text-xs font-medium text-[#004070]">Group</TableHead>
                   ) : null}
                   <TableHead />
@@ -488,12 +588,12 @@ export function ManageUsersTable({
                     <TableCell className="text-xs font-semibold text-[#004070]">
                       {user.assessmentStatus}
                     </TableCell>
-                    {groupingEnabled ? (
+                    {showGroupControls ? (
                       <TableCell className="text-xs text-[#004070]">{user.group ?? "—"}</TableCell>
                     ) : null}
                     <TableCell>
                       <button
-                        onClick={() => openEditModal(user)}
+                        onClick={() => void openEditModal(user)}
                         className="flex items-center gap-1 text-xs text-[#004070] hover:text-[#00ABEB]"
                       >
                         <Pencil className="h-3 w-3" /> Edit

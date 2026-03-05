@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,16 +21,12 @@ import {
   SlidersHorizontal,
   ChevronDown,
   ChevronsUpDown,
-  SquareDashed,
 } from "lucide-react";
 import type { TemplateOption } from "./manage-assessments-content";
 import type { CohortMemberRow } from "@/app/api/corp-admin/cohort-members/route";
-import { AssignGroupDialog } from "./assign-group-dialog";
 import { downloadCsv, sanitizeCsvFilename, toCsv } from "@/lib/csv";
 
 type MemberStatusFilter = "all" | "Invited" | "Accepted" | "Active" | "Completed";
-type GroupFilter = "all" | "grouped" | "ungrouped";
-type GroupOption = { id: string; name: string };
 
 function initials(name: string) {
   return name
@@ -81,18 +77,17 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
   const [resendModalOpen, setResendModalOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [groupingEnabled, setGroupingEnabled] = useState(false);
+  const [rosterUsers, setRosterUsers] = useState<CohortMemberRow[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<MemberStatusFilter>("all");
-  const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
   const [tableMessage, setTableMessage] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editReviewerId, setEditReviewerId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
-  const [editGroupId, setEditGroupId] = useState("");
+  const [editReviewerUserIds, setEditReviewerUserIds] = useState<string[]>([]);
+  const [editRosterSearch, setEditRosterSearch] = useState("");
   const [editSaving, setEditSaving] = useState(false);
-  const [groupOptions, setGroupOptions] = useState<GroupOption[]>([]);
 
   // Invite form state
   const [inviteName, setInviteName] = useState("");
@@ -109,11 +104,16 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
     setLoading(true);
     setSelected(new Set());
     try {
-      const res = await fetch(`/api/corp-admin/cohort-members?cohortId=${cohortId}&role=reviewer`);
-      const data = await res.json();
-      setReviewers(Array.isArray(data) ? data : []);
+      const [reviewerRes, usersRes] = await Promise.all([
+        fetch(`/api/corp-admin/cohort-members?cohortId=${cohortId}&role=reviewer`),
+        fetch(`/api/corp-admin/cohort-members?cohortId=${cohortId}&role=user`),
+      ]);
+      const [reviewerData, usersData] = await Promise.all([reviewerRes.json(), usersRes.json()]);
+      setReviewers(Array.isArray(reviewerData) ? reviewerData : []);
+      setRosterUsers(Array.isArray(usersData) ? usersData : []);
     } catch {
       setReviewers([]);
+      setRosterUsers([]);
     } finally {
       setLoading(false);
     }
@@ -123,38 +123,6 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
     void loadReviewers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cohortId]);
-
-  useEffect(() => {
-    if (!cohortId) {
-      setGroupingEnabled(false);
-      return;
-    }
-    fetch(`/api/corp-admin/cohort-settings?cohortId=${cohortId}`)
-      .then((r) => r.json())
-      .then((data) => setGroupingEnabled(Boolean(data?.grouping_enabled)))
-      .catch(() => setGroupingEnabled(false));
-  }, [cohortId]);
-
-  useEffect(() => {
-    if (!cohortId || !groupingEnabled) {
-      setGroupOptions([]);
-      return;
-    }
-    fetch(`/api/corp-admin/cohort-groups?cohortId=${cohortId}`)
-      .then((r) => r.json())
-      .then((data) => {
-        const options = Array.isArray(data)
-          ? data
-              .map((row) => ({
-                id: typeof row?.id === "string" ? row.id : "",
-                name: typeof row?.name === "string" ? row.name : "",
-              }))
-              .filter((row) => row.id && row.name)
-          : [];
-        setGroupOptions(options);
-      })
-      .catch(() => setGroupOptions([]));
-  }, [cohortId, groupingEnabled]);
 
   const submitInvite = async (resend: boolean) => {
     const res = await fetch("/api/corp-admin/cohort-invites", {
@@ -266,24 +234,38 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
       r.name.toLowerCase().includes(search.toLowerCase()) ||
       r.email.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "all" || r.assessmentStatus === statusFilter;
-    const matchesGroup =
-      !groupingEnabled ||
-      groupFilter === "all" ||
-      (groupFilter === "grouped" ? !!r.group : !r.group);
-    return matchesSearch && matchesStatus && matchesGroup;
+    return matchesSearch && matchesStatus;
   });
-  const hasActiveFilters = statusFilter !== "all" || (groupingEnabled && groupFilter !== "all");
+  const hasActiveFilters = statusFilter !== "all";
+
+  const assignedUserIdsByReviewer = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const rosterUser of rosterUsers) {
+      if (!rosterUser.reviewerId) continue;
+      const current = map.get(rosterUser.reviewerId) ?? [];
+      current.push(rosterUser.id);
+      map.set(rosterUser.reviewerId, current);
+    }
+    return map;
+  }, [rosterUsers]);
+
+  const assignedCountByReviewer = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [reviewerId, userIds] of assignedUserIdsByReviewer.entries()) {
+      map.set(reviewerId, userIds.length);
+    }
+    return map;
+  }, [assignedUserIdsByReviewer]);
 
   const handleExport = () => {
     const rows: Array<Array<string>> = [
-      groupingEnabled
-        ? ["Name", "Email", "Assessment Status", "Assigned To"]
-        : ["Name", "Email", "Assessment Status"],
-      ...filtered.map((reviewer) =>
-        groupingEnabled
-          ? [reviewer.name, reviewer.email, reviewer.assessmentStatus, reviewer.group ?? ""]
-          : [reviewer.name, reviewer.email, reviewer.assessmentStatus]
-      ),
+      ["Name", "Email", "Assessment Status", "Assigned Invitees"],
+      ...filtered.map((reviewer) => [
+        reviewer.name,
+        reviewer.email,
+        reviewer.assessmentStatus,
+        String(assignedCountByReviewer.get(reviewer.id) ?? 0),
+      ]),
     ];
     const filename = `reviewers-roster-${sanitizeCsvFilename(
       templateOptions.find((option) => option.value === cohortId)?.label ?? cohortId ?? "cohort"
@@ -295,7 +277,8 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
     setEditReviewerId(reviewer.id);
     setEditName(reviewer.name === "—" ? "" : reviewer.name);
     setEditEmail(reviewer.email === "—" ? "" : reviewer.email);
-    setEditGroupId(reviewer.groupId ?? "");
+    setEditReviewerUserIds(assignedUserIdsByReviewer.get(reviewer.id) ?? []);
+    setEditRosterSearch("");
     setEditOpen(true);
   };
 
@@ -313,7 +296,7 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
           role: "reviewer",
           name: editName.trim(),
           email: editEmail.trim().toLowerCase(),
-          groupId: groupingEnabled ? (editGroupId || null) : null,
+          reviewerUserIds: editReviewerUserIds,
         }),
       });
       const payload = (await res.json()) as { error?: string };
@@ -326,6 +309,21 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
     } finally {
       setEditSaving(false);
     }
+  };
+
+  const filteredRosterUsers = rosterUsers.filter((user) => {
+    const query = editRosterSearch.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      user.name.toLowerCase().includes(query) ||
+      user.email.toLowerCase().includes(query)
+    );
+  });
+
+  const toggleRosterUser = (userId: string) => {
+    setEditReviewerUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
   };
 
   return (
@@ -342,23 +340,43 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
               <label className="text-xs font-medium text-[#004070]">Email</label>
               <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="text-xs" />
             </div>
-            {groupingEnabled ? (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-[#004070]">Group</label>
-                <select
-                  value={editGroupId}
-                  onChange={(e) => setEditGroupId(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-[#004070] focus:outline-none focus:ring-2 focus:ring-[#00ABEB]"
-                >
-                  <option value="">No group</option>
-                  {groupOptions.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
-                  ))}
-                </select>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-[#004070]">
+                Assigned Invitees ({editReviewerUserIds.length})
+              </label>
+              <Input
+                placeholder="Search invitees"
+                value={editRosterSearch}
+                onChange={(e) => setEditRosterSearch(e.target.value)}
+                className="h-8 text-xs"
+              />
+              <div className="max-h-44 overflow-y-auto rounded-md border border-input p-2">
+                {filteredRosterUsers.length === 0 ? (
+                  <p className="py-3 text-center text-xs text-muted-foreground">
+                    No invitees found.
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {filteredRosterUsers.map((user) => (
+                      <label
+                        key={user.id}
+                        className="flex cursor-pointer items-center justify-between rounded px-2 py-1.5 hover:bg-gray-50"
+                      >
+                        <span className="truncate pr-3 text-xs text-[#004070]">
+                          {user.name} <span className="text-muted-foreground">({user.email})</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={editReviewerUserIds.includes(user.id)}
+                          onChange={() => toggleRosterUser(user.id)}
+                          className="h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-[#004070]"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
-            ) : null}
+            </div>
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
                 Cancel
@@ -421,27 +439,12 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
                 <option value="Completed">Completed</option>
               </select>
             </div>
-            {groupingEnabled ? (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-[#004070]">Group</label>
-                <select
-                  value={groupFilter}
-                  onChange={(e) => setGroupFilter((e.target.value as GroupFilter) ?? "all")}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-[#004070] focus:outline-none focus:ring-2 focus:ring-[#00ABEB]"
-                >
-                  <option value="all">All</option>
-                  <option value="grouped">Grouped</option>
-                  <option value="ungrouped">Ungrouped</option>
-                </select>
-              </div>
-            ) : null}
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => {
                   setStatusFilter("all");
-                  if (groupingEnabled) setGroupFilter("all");
                 }}
               >
                 Reset
@@ -486,14 +489,6 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
             >
               <Download className="h-3.5 w-3.5" /> Export
             </Button>
-            {groupingEnabled ? (
-              <AssignGroupDialog
-                cohortId={cohortId}
-                selectedUserIds={[...selected]}
-                role="reviewer"
-                onAssigned={loadReviewers}
-              />
-            ) : null}
             <div className="relative ml-auto">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -530,9 +525,7 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
                     <span className="flex items-center gap-1">Email <ArrowUpDown className="h-3 w-3" /></span>
                   </TableHead>
                   <TableHead className="text-xs font-medium text-[#004070]">Status</TableHead>
-                  {groupingEnabled ? (
-                    <TableHead className="text-xs font-medium text-[#004070]">Assigned To</TableHead>
-                  ) : null}
+                  <TableHead className="text-xs font-medium text-[#004070]">Assigned Invitees</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -559,21 +552,16 @@ export function ReviewersContent({ templateOptions }: { templateOptions: Templat
                     <TableCell className="text-xs font-semibold text-[#004070]">
                       {reviewer.assessmentStatus}
                     </TableCell>
-                    {groupingEnabled ? (
-                      <TableCell className="text-xs text-[#004070]">{reviewer.group ?? "—"}</TableCell>
-                    ) : null}
+                    <TableCell className="text-xs text-[#004070]">
+                      {assignedCountByReviewer.get(reviewer.id) ?? 0}
+                    </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => openEditModal(reviewer)}
-                          className="flex items-center gap-1 text-xs text-[#004070] hover:text-[#00ABEB]"
-                        >
-                          <Pencil className="h-3 w-3" /> Edit
-                        </button>
-                        <button className="text-muted-foreground hover:text-[#004070]">
-                          <SquareDashed className="h-4 w-4" />
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => openEditModal(reviewer)}
+                        className="flex items-center gap-1 text-xs text-[#004070] hover:text-[#00ABEB]"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </button>
                     </TableCell>
                   </TableRow>
                 ))}

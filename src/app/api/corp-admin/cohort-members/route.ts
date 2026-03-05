@@ -9,6 +9,7 @@ export type CohortMemberRow = {
   assessmentStatus: "Completed" | "Active" | "Invited" | "Accepted";
   group: string | null;
   groupId: string | null;
+  reviewerId?: string | null;
 };
 
 const COMPLETED_STATUSES = ["submitted", "in_review", "reviewed", "completed"];
@@ -44,11 +45,12 @@ export async function GET(req: Request) {
 
   if (!cohort) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { data: members } = await supabase
+  const { data: members, error: membersError } = await supabase
     .from("cohort_members")
-    .select("user_id, group_id")
+    .select("user_id, group_id, reviewer_id")
     .eq("cohort_id", cohortId)
     .eq("role", role);
+  if (membersError) return NextResponse.json({ error: membersError.message }, { status: 500 });
 
   if (!members || members.length === 0) return NextResponse.json([]);
 
@@ -128,6 +130,7 @@ export async function GET(req: Request) {
       assessmentStatus,
       group: m.group_id ? (groupNameById.get(m.group_id) ?? null) : null,
       groupId: m.group_id ?? null,
+      reviewerId: m.reviewer_id ?? null,
     };
   });
 
@@ -144,6 +147,9 @@ export async function PATCH(req: Request) {
   const role = body?.role === "user" || body?.role === "reviewer" ? body.role : null;
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const reviewerUserIds = Array.isArray(body?.reviewerUserIds)
+    ? [...new Set(body.reviewerUserIds.filter((id: unknown): id is string => typeof id === "string"))]
+    : null;
   const groupId =
     body?.groupId === null ? null : typeof body?.groupId === "string" ? body.groupId : undefined;
 
@@ -185,7 +191,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Member role mismatch" }, { status: 400 });
   }
 
-  if (groupId !== undefined) {
+  if (groupId !== undefined && member.role === "user") {
     const { data: settings } = await supabase
       .from("cohort_settings")
       .select("grouping_enabled")
@@ -219,7 +225,7 @@ export async function PATCH(req: Request) {
   if (profileError) return NextResponse.json({ error: profileError.message }, { status: 500 });
 
   const updates: { group_id?: string | null } = {};
-  if (groupId !== undefined) {
+  if (groupId !== undefined && member.role === "user") {
     updates.group_id = groupId;
   }
 
@@ -230,6 +236,50 @@ export async function PATCH(req: Request) {
       .eq("cohort_id", cohortId)
       .eq("user_id", targetUserId);
     if (memberError) return NextResponse.json({ error: memberError.message }, { status: 500 });
+  }
+
+  if (member.role === "reviewer" && reviewerUserIds) {
+    const { data: selectedUsers, error: selectedUsersError } = reviewerUserIds.length > 0
+      ? await supabase
+          .from("cohort_members")
+          .select("user_id")
+          .eq("cohort_id", cohortId)
+          .eq("role", "user")
+          .in("user_id", reviewerUserIds)
+      : { data: [] as Array<{ user_id: string }>, error: null };
+    if (selectedUsersError) {
+      return NextResponse.json({ error: selectedUsersError.message }, { status: 500 });
+    }
+
+    const validUserIds = new Set((selectedUsers ?? []).map((row) => row.user_id));
+    if (reviewerUserIds.some((id) => !validUserIds.has(id))) {
+      return NextResponse.json(
+        { error: "reviewerUserIds must be users in this cohort" },
+        { status: 400 }
+      );
+    }
+
+    const { error: clearAssignmentsError } = await supabase
+      .from("cohort_members")
+      .update({ reviewer_id: null })
+      .eq("cohort_id", cohortId)
+      .eq("role", "user")
+      .eq("reviewer_id", targetUserId)
+    if (clearAssignmentsError) {
+      return NextResponse.json({ error: clearAssignmentsError.message }, { status: 500 });
+    }
+
+    if (reviewerUserIds.length > 0) {
+      const { error: assignUsersError } = await supabase
+        .from("cohort_members")
+        .update({ reviewer_id: targetUserId })
+        .eq("cohort_id", cohortId)
+        .eq("role", "user")
+        .in("user_id", reviewerUserIds);
+      if (assignUsersError) {
+        return NextResponse.json({ error: assignUsersError.message }, { status: 500 });
+      }
+    }
   }
 
   return NextResponse.json({ ok: true });

@@ -189,3 +189,24 @@ $$;
 
 - Applied to staging only (not yet in `main`)
 - Both RPCs were created directly in staging
+
+## 2026-03-05
+
+### Added `public.cohort_memberships.reviewer_id`
+
+```sql
+alter table public.cohort_memberships
+add column reviewer_id uuid null;
+
+alter table public.cohort_memberships
+add constraint cohort_memberships_reviewer_id_fkey
+foreign key (reviewer_id)
+references public.profiles (id)
+on update cascade
+on delete cascade;
+```
+
+### Notes
+
+- Applied to staging only (not yet in `main`)
+- `reviewer_id` links a membership row to the assigned reviewer profile

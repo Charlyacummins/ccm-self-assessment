@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
 import {
   Table,
   TableBody,
@@ -8,31 +11,84 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const submissions = [
-  {
-    id: "asm_1001",
-    name: "Acme Corp",
-    assessment: "Contract Management Maturity",
-    submittedDate: "2026-02-01",
-    status: "Pending",
-  },
-  {
-    id: "asm_1002",
-    name: "Northwind Logistics",
-    assessment: "Procurement Capability Baseline",
-    submittedDate: "2026-01-28",
-    status: "In Review",
-  },
-  {
-    id: "asm_1003",
-    name: "Globex Industries",
-    assessment: "Supplier Governance Assessment",
-    submittedDate: "2026-01-25",
-    status: "Pending",
-  },
-];
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export default function ReviewerSubmissionsPage() {
+interface AssessmentRow {
+  id: string;
+  user_id: string;
+  template_id: string;
+  status: string;
+  submitted_at: string | null;
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function mapSubmissionStatus(status: string): string {
+  switch (status) {
+    case "in_review":
+      return "In Review";
+    case "reviewed":
+    case "completed":
+      return "Completed";
+    case "submitted":
+    default:
+      return "Pending";
+  }
+}
+
+export default async function ReviewerSubmissionsPage() {
+  const { userId } = await auth();
+  if (!userId) redirect("/login");
+
+  const supabase = db();
+
+  const { data: reviewerProfile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("clerk_user_id", userId)
+    .maybeSingle();
+  if (!reviewerProfile) return null;
+
+  const { data: assessments } = await supabase
+    .from("assessments")
+    .select("id, user_id, template_id, status, submitted_at")
+    .eq("reviewed_by", reviewerProfile.id)
+    .in("status", ["submitted", "in_review", "reviewed", "completed"])
+    .order("submitted_at", { ascending: false, nullsFirst: false });
+
+  const inviteeIds = [...new Set((assessments ?? []).map((a) => a.user_id))];
+  const templateIds = [...new Set((assessments ?? []).map((a) => a.template_id))];
+
+  const [{ data: inviteeProfiles }, { data: templates }] = await Promise.all([
+    inviteeIds.length
+      ? supabase.from("profiles").select("id, full_name").in("id", inviteeIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; full_name: string | null }> }),
+    templateIds.length
+      ? supabase.from("assessment_templates").select("id, title").in("id", templateIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; title: string | null }> }),
+  ]);
+
+  const inviteeNameById = new Map((inviteeProfiles ?? []).map((p) => [p.id, p.full_name]));
+  const templateTitleById = new Map((templates ?? []).map((t) => [t.id, t.title]));
+
+  const rows = (assessments ?? []).map((assessment: AssessmentRow) => ({
+    id: assessment.id,
+    name: inviteeNameById.get(assessment.user_id) || "Unknown Invitee",
+    assessment: templateTitleById.get(assessment.template_id) || "Assessment",
+    submittedDate: formatDate(assessment.submitted_at),
+    status: mapSubmissionStatus(assessment.status),
+  }));
+
   return (
     <section className="space-y-6">
       <div>
@@ -53,22 +109,30 @@ export default function ReviewerSubmissionsPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {submissions.map((submission) => (
-            <TableRow key={submission.id}>
-              <TableCell className="font-medium text-[#004070]">{submission.name}</TableCell>
-              <TableCell>{submission.assessment}</TableCell>
-              <TableCell>{submission.submittedDate}</TableCell>
-              <TableCell>{submission.status}</TableCell>
-              <TableCell>
-                <Link
-                  href={`/reviewer/submissions/${submission.id}`}
-                  className="font-medium text-[#00ABEB] hover:text-[#004070]"
-                >
-                  Review
-                </Link>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} className="py-8 text-center text-[#534F4F]">
+                No assessments currently assigned for review.
               </TableCell>
             </TableRow>
-          ))}
+          ) : (
+            rows.map((submission) => (
+              <TableRow key={submission.id}>
+                <TableCell className="font-medium text-[#004070]">{submission.name}</TableCell>
+                <TableCell>{submission.assessment}</TableCell>
+                <TableCell>{submission.submittedDate}</TableCell>
+                <TableCell>{submission.status}</TableCell>
+                <TableCell>
+                  <Link
+                    href={`/reviewer/submissions/${submission.id}`}
+                    className="font-medium text-[#00ABEB] hover:text-[#004070]"
+                  >
+                    Review
+                  </Link>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
         </TableBody>
       </Table>
     </section>

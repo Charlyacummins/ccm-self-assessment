@@ -45,7 +45,7 @@ export default async function AssessmentStartPage() {
   let hasCohortMembership = false;
   const { data: cohortMember } = await supabase
     .from("cohort_members")
-    .select("cohort_id")
+    .select("cohort_id, reviewer_id")
     .eq("user_id", profile.id)
     .limit(1)
     .single();
@@ -134,16 +134,27 @@ export default async function AssessmentStartPage() {
   let assessmentId: string;
   if (existingAssessment) {
     assessmentId = existingAssessment.id;
+    const reviewerUpdate = cohortMember?.reviewer_id
+      ? { reviewed_by: cohortMember.reviewer_id }
+      : {};
     if (existingAssessment.status !== "in_progress") {
       await supabase
         .from("assessments")
         .update({
           status: "in_progress",
           started_at: new Date().toISOString(),
+          ...reviewerUpdate,
         })
         .eq("id", existingAssessment.id);
+    } else if (cohortMember?.reviewer_id) {
+      await supabase
+        .from("assessments")
+        .update(reviewerUpdate)
+        .eq("id", existingAssessment.id)
+        .is("reviewed_by", null);
     }
   } else {
+    const reviewerId = cohortMember?.reviewer_id ?? null;
     const { data: newAssessment, error } = await supabase
       .from("assessments")
       .insert({
@@ -151,6 +162,7 @@ export default async function AssessmentStartPage() {
         template_id: templateId,
         status: "in_progress",
         started_at: new Date().toISOString(),
+        reviewed_by: reviewerId,
       })
       .select("id")
       .single();
