@@ -8,7 +8,6 @@ import {
 } from "./assessment-results-chart";
 import { BenchmarkOptions } from "./benchmark-options";
 import { AssessmentFeedback } from "./assessment-feedback";
-import { useBenchmarks } from "./use-benchmarks";
 import { useCorporateBenchmarks } from "./use-corporate-benchmarks";
 import { CorpChartKeyBar } from "./corp-chart-key-bar";
 import {
@@ -45,31 +44,17 @@ export function CorpResultsPage({
 }: CorpResultsPageProps) {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [benchmarkType, setBenchmarkType] = useState<"global" | "corporate">(
-    "global"
-  );
   const [showReviewerScores, setShowReviewerScores] = useState(false);
 
-  const { data: globalBenchmarks, isLoading: globalLoading } = useBenchmarks({
-    skillGroups: skillGroupResults,
-    templateId,
-    filters,
-    enabled: hasResults && benchmarkType === "global",
-  });
-
-  const { data: corpBenchmarks, isLoading: corpLoading } = useCorporateBenchmarks({
+  const { data: benchmarks, isLoading: benchmarksLoading } = useCorporateBenchmarks({
     skillGroups: skillGroupResults,
     corporationId,
     cohortId,
     templateId,
     filters,
-    enabled: hasResults && benchmarkType === "corporate",
+    type: "global",
+    enabled: hasResults,
   });
-
-  const benchmarks =
-    benchmarkType === "corporate" ? corpBenchmarks : globalBenchmarks;
-  const benchmarksLoading =
-    benchmarkType === "corporate" ? corpLoading : globalLoading;
 
   // TODO: wire up reviewer scores from API when available
   const reviewerScores: Record<string, number> = {};
@@ -96,12 +81,12 @@ export function CorpResultsPage({
         reviewerScores={reviewerScores}
         showReviewerScores={showReviewerScores}
         emptyStateMessage={emptyResultsMessage}
+        subjectLabel="Cohort"
         keyBarSlot={
           <CorpChartKeyBar
-            benchmarkType={benchmarkType}
-            onBenchmarkTypeChange={setBenchmarkType}
             showReviewerScores={showReviewerScores}
             onToggleReviewerScores={setShowReviewerScores}
+            subjectLabel="Cohort"
           />
         }
       />
@@ -133,6 +118,8 @@ export function CorpResultsPage({
         skills={selectedSkills}
         templateId={templateId}
         filters={filters}
+        skillBenchmarkEndpoint="/api/corp-admin/skill-benchmark"
+        skillScoreLabel="Cohort Avg"
       />
     </div>
   );

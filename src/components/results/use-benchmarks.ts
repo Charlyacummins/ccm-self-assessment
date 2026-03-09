@@ -72,7 +72,8 @@ export function useBenchmarks({
   );
   const [isLoading, setIsLoading] = useState(enabled);
 
-  const fetchBenchmarks = useCallback(async () => {
+  const fetchBenchmarks = useCallback(async (signal?: AbortSignal) => {
+    if (!enabled) return;
     const filterKey = stableFilterKey(filters);
     const results: Record<string, BenchmarkData> = {};
     const toFetch: SkillGroupResult[] = [];
@@ -94,13 +95,18 @@ export function useBenchmarks({
 
     await Promise.all(
       toFetch.map(async (sg) => {
+        if (signal?.aborted) return;
         const params = new URLSearchParams({
           templateId,
           skillGroupId: sg.id,
           ...filters,
         });
         try {
-          const res = await fetch(`/api/assessment/benchmark?${params}`);
+          const res = await fetch(
+            `/api/assessment/benchmark?${params}`,
+            signal ? { signal } : undefined
+          );
+          if (signal?.aborted) return;
           const data = await res.json();
           const value = data && !data.error ? (data as BenchmarkData) : null;
           const key = getCacheKey(templateId, sg.id, filterKey);
@@ -114,24 +120,28 @@ export function useBenchmarks({
       })
     );
 
+    if (signal?.aborted) return;
     setBenchmarks(results);
-  }, [filters, skillGroups, templateId]);
+  }, [enabled, filters, skillGroups, templateId]);
 
   useEffect(() => {
     if (!enabled || skillGroups.length === 0) {
+      setBenchmarks({});
       setIsLoading(false);
       return;
     }
     setIsLoading(true);
+    const controller = new AbortController();
     let cancelled = false;
 
     (async () => {
-      await fetchBenchmarks();
+      await fetchBenchmarks(controller.signal);
       if (!cancelled) setIsLoading(false);
     })();
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [enabled, skillGroups, fetchBenchmarks]);
 

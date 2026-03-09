@@ -56,6 +56,7 @@ export function AssessmentResultsChart({
   reviewerScores,
   showReviewerScores,
   emptyStateMessage,
+  subjectLabel = "You",
 }: {
   skillGroups: SkillGroupResult[];
   templateId: string;
@@ -67,6 +68,7 @@ export function AssessmentResultsChart({
   reviewerScores?: Record<string, number>;
   showReviewerScores?: boolean;
   emptyStateMessage?: string;
+  subjectLabel?: string;
 }) {
   if (!hasResults) {
     return (
@@ -104,7 +106,13 @@ export function AssessmentResultsChart({
     };
   });
 
-  const chartConfig = showReviewerScores ? reviewerChartConfig : baseChartConfig;
+  const chartConfig = {
+    ...(showReviewerScores ? reviewerChartConfig : baseChartConfig),
+    you: {
+      ...(showReviewerScores ? reviewerChartConfig.you : baseChartConfig.you),
+      label: subjectLabel,
+    },
+  } satisfies ChartConfig;
 
   return (
     <Card>
@@ -184,7 +192,7 @@ export function AssessmentResultsChart({
             <span className="font-medium text-muted-foreground">Key</span>
             <span className="flex items-center gap-1.5">
               <span className="inline-block h-3 w-3 rounded-sm bg-[#004070]" />
-              You
+              {subjectLabel}
             </span>
             <span className="flex items-center gap-1.5">
               <span className="inline-block h-3 w-3 rounded-sm bg-[#00ABEB]" />

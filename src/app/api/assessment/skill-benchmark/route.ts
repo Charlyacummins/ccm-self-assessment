@@ -10,12 +10,11 @@ export async function GET(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
-  const templateId = searchParams.get("templateId");
   const templateSkillId = searchParams.get("templateSkillId");
 
-  if (!templateId || !templateSkillId) {
+  if (!templateSkillId) {
     return NextResponse.json(
-      { error: "templateId and templateSkillId are required" },
+      { error: "templateSkillId is required" },
       { status: 400 }
     );
   }
@@ -27,9 +26,8 @@ export async function GET(req: Request) {
   );
 
   const { data, error } = await supabase.rpc(
-    "rpc_dynamic_skill_benchmark_live",
+    "rpc_dynamic_skill_benchmark_live_v2",
     {
-      p_template_id: templateId,
       p_template_skill_id: templateSkillId,
       p_submitted_year: searchParams.get("submittedYear")
         ? Number(searchParams.get("submittedYear"))

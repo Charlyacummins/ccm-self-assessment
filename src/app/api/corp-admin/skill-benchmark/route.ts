@@ -10,13 +10,10 @@ export async function GET(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
-  const skillGroupId = searchParams.get("skillGroupId");
+  const templateSkillId = searchParams.get("templateSkillId");
 
-  if (!skillGroupId) {
-    return NextResponse.json(
-      { error: "skillGroupId is required" },
-      { status: 400 }
-    );
+  if (!templateSkillId) {
+    return NextResponse.json({ error: "templateSkillId is required" }, { status: 400 });
   }
 
   const supabase = db();
@@ -25,8 +22,8 @@ export async function GET(req: Request) {
     searchParams.get("yearsExperience")
   );
 
-  const { data, error } = await supabase.rpc("rpc_skill_group_benchmark_v2", {
-    p_skill_group_ids: [skillGroupId],
+  const { data, error } = await supabase.rpc("rpc_dynamic_skill_benchmark_live_v2", {
+    p_template_skill_id: templateSkillId,
     p_submitted_year: searchParams.get("submittedYear")
       ? Number(searchParams.get("submittedYear"))
       : null,
@@ -42,6 +39,7 @@ export async function GET(req: Request) {
   });
 
   if (error) {
+    console.error("[corp-admin/skill-benchmark]", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

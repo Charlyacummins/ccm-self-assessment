@@ -49,6 +49,19 @@ const GEOGRAPHY: { key: string; label: string; icon: LucideIcon }[] = [
   { key: "subRegion", label: "Sub Region", icon: Map },
 ];
 
+const FILTER_LABELS: Record<string, string> = {
+  role: "Role",
+  functionalArea: "Function",
+  industry: "Industry",
+  educationLevel: "Education",
+  yearsExperience: "Experience",
+  jobLevel: "Seniority",
+  country: "Country",
+  region: "Region",
+  subRegion: "Sub Region",
+  submittedYear: "Year",
+};
+
 export function BenchmarkOptions({
   onApply,
   extraDemographics,
@@ -59,6 +72,7 @@ export function BenchmarkOptions({
   const [options, setOptions] = useState<FilterOptions>({});
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
     fetch("/api/assessment/filter-options")
@@ -104,6 +118,7 @@ export function BenchmarkOptions({
     } else {
       delete next.submittedYear;
     }
+    setAppliedFilters(Object.keys(next).length > 0 ? next : null);
     onApply(next);
   };
 
@@ -111,6 +126,7 @@ export function BenchmarkOptions({
     setFilters({});
     setDateStart("");
     setDateEnd("");
+    setAppliedFilters(null);
     onDateRangeChange?.("", "");
     onApply({});
   };
@@ -120,6 +136,7 @@ export function BenchmarkOptions({
     | string[];
 
   return (
+  <div className="space-y-3">
     <Card>
       <CardContent className="py-8">
         <h2 className="mb-6 text-center text-lg font-semibold text-[#004070]">
@@ -256,5 +273,15 @@ export function BenchmarkOptions({
         </div>
       </CardContent>
     </Card>
+
+    {appliedFilters && Object.keys(appliedFilters).length > 0 && (
+      <div className="rounded-lg border border-[#00ABEB]/30 bg-[#00ABEB]/5 px-4 py-3 text-sm text-[#004070]">
+        <span className="font-medium">Showing benchmark results for users with: </span>
+        {Object.entries(appliedFilters)
+          .map(([key, value]) => `${FILTER_LABELS[key] ?? key}: ${value}`)
+          .join(" · ")}
+      </div>
+    )}
+  </div>
   );
 }

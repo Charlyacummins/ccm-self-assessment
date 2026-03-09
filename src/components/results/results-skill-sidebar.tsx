@@ -95,6 +95,8 @@ export function ResultsSkillSidebar({
   skills,
   templateId,
   filters,
+  skillBenchmarkEndpoint,
+  skillScoreLabel = "Your Score",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -103,6 +105,8 @@ export function ResultsSkillSidebar({
   skills: SkillScore[];
   templateId: string;
   filters: Record<string, string>;
+  skillBenchmarkEndpoint?: string;
+  skillScoreLabel?: string;
 }) {
   const hasFilters = Object.keys(filters).length > 0;
   const filterValues = Object.values(filters);
@@ -122,6 +126,7 @@ export function ResultsSkillSidebar({
     templateId,
     filters,
     enabled: open,
+    endpoint: skillBenchmarkEndpoint,
   });
 
   return (
@@ -134,7 +139,7 @@ export function ResultsSkillSidebar({
 
           <div className="mt-6 flex-1 overflow-y-auto pr-2">
             <div className="grid grid-cols-2 gap-4">
-              <Donut value={userScore} total={userTotal} label="Your Score" />
+              <Donut value={userScore} total={userTotal} label={skillScoreLabel} />
               <Donut
                 value={benchmarkScore}
                 total={benchmarkTotal}
@@ -200,7 +205,7 @@ export function ResultsSkillSidebar({
                         </AccordionTrigger>
                         <AccordionContent>
                           <div className="flex items-center justify-between text-sm">
-                            <span>Your Score</span>
+                            <span>{skillScoreLabel}</span>
                             <Badge variant="outline">
                               <span className={userColor}>
                                 {skill.maxPoints > 0

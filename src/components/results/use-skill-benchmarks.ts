@@ -65,11 +65,13 @@ export function useSkillBenchmarks({
   templateId,
   filters,
   enabled,
+  endpoint = "/api/assessment/skill-benchmark",
 }: {
   skills: SkillScore[];
   templateId: string;
   filters: Record<string, string>;
   enabled: boolean;
+  endpoint?: string;
 }) {
   const [benchmarks, setBenchmarks] = useState<Record<string, SkillBenchmarkData>>(
     {}
@@ -97,13 +99,11 @@ export function useSkillBenchmarks({
 
     await Promise.all(
       toFetch.map(async (skill) => {
-        const params = new URLSearchParams({
-          templateId,
-          templateSkillId: skill.templateSkillId,
-          ...filters,
-        });
+        const paramObj: Record<string, string> = { templateSkillId: skill.templateSkillId, ...filters };
+        if (endpoint === "/api/assessment/skill-benchmark") paramObj.templateId = templateId;
+        const params = new URLSearchParams(paramObj);
         try {
-          const res = await fetch(`/api/assessment/skill-benchmark?${params}`);
+          const res = await fetch(`${endpoint}?${params}`);
           const data = await res.json();
           const value = data && !data.error ? (data as SkillBenchmarkData) : null;
           const key = getCacheKey(templateId, skill.templateSkillId, filterKey);
@@ -118,7 +118,7 @@ export function useSkillBenchmarks({
     );
 
     setBenchmarks(results);
-  }, [filters, skills, templateId]);
+  }, [endpoint, filters, skills, templateId]);
 
   useEffect(() => {
     if (!enabled || skills.length === 0) return;

@@ -18,13 +18,13 @@ function stableFilterKey(filters?: Record<string, string> | null) {
 }
 
 function getCacheKey(
+  type: "global" | "corporate",
   corporationId: string,
   cohortId: string,
-  templateId: string,
   skillGroupId: string,
   filterKey: string
 ) {
-  return `corp-benchmarks:${corporationId}:${cohortId}:${templateId}:${skillGroupId}:${filterKey}`;
+  return `corp-benchmarks:${type}:${corporationId}:${cohortId}:${skillGroupId}:${filterKey}`;
 }
 
 function readCache(key: string) {
@@ -66,6 +66,7 @@ export function useCorporateBenchmarks({
   templateId,
   filters,
   enabled,
+  type = "corporate",
 }: {
   skillGroups: SkillGroupResult[];
   corporationId: string;
@@ -73,19 +74,21 @@ export function useCorporateBenchmarks({
   templateId: string;
   filters: Record<string, string>;
   enabled: boolean;
+  type?: "global" | "corporate";
 }) {
   const [benchmarks, setBenchmarks] = useState<Record<string, BenchmarkData>>(
     {}
   );
   const [isLoading, setIsLoading] = useState(enabled);
 
-  const fetchBenchmarks = useCallback(async () => {
+  const fetchBenchmarks = useCallback(async (signal?: AbortSignal) => {
+    if (!enabled) return;
     const filterKey = stableFilterKey(filters);
     const results: Record<string, BenchmarkData> = {};
     const toFetch: SkillGroupResult[] = [];
 
     for (const sg of skillGroups) {
-      const key = getCacheKey(corporationId, cohortId, templateId, sg.id, filterKey);
+      const key = getCacheKey(type, corporationId, cohortId, sg.id, filterKey);
       const cached = readCache(key);
       if (cached) {
         results[sg.id] = cached;
@@ -101,20 +104,33 @@ export function useCorporateBenchmarks({
 
     await Promise.all(
       toFetch.map(async (sg) => {
-        const params = new URLSearchParams({
-          corporationId,
-          cohortId,
-          templateId,
-          skillGroupId: sg.id,
-          ...filters,
-        });
+        if (signal?.aborted) return;
+
+        const params =
+          type === "global"
+            ? new URLSearchParams({ cohortId, skillGroupId: sg.id, ...filters })
+            : new URLSearchParams({
+                corporationId,
+                cohortId,
+                templateId,
+                skillGroupId: sg.id,
+                ...filters,
+              });
+
+        const endpoint =
+          type === "global"
+            ? `/api/corp-admin/benchmark`
+            : `/api/assessment/corporate-benchmark`;
+
         try {
           const res = await fetch(
-            `/api/assessment/corporate-benchmark?${params}`
+            `${endpoint}?${params}`,
+            signal ? { signal } : undefined
           );
+          if (signal?.aborted) return;
           const data = await res.json();
           const value = data && !data.error ? (data as BenchmarkData) : null;
-          const key = getCacheKey(corporationId, cohortId, templateId, sg.id, filterKey);
+          const key = getCacheKey(type, corporationId, cohortId, sg.id, filterKey);
           writeCache(key, value);
           if (value) {
             results[sg.id] = value;
@@ -125,24 +141,28 @@ export function useCorporateBenchmarks({
       })
     );
 
+    if (signal?.aborted) return;
     setBenchmarks(results);
-  }, [cohortId, corporationId, filters, skillGroups, templateId]);
+  }, [cohortId, corporationId, enabled, filters, skillGroups, templateId, type]);
 
   useEffect(() => {
     if (!enabled || skillGroups.length === 0) {
+      setBenchmarks({});
       setIsLoading(false);
       return;
     }
     setIsLoading(true);
+    const controller = new AbortController();
     let cancelled = false;
 
     (async () => {
-      await fetchBenchmarks();
+      await fetchBenchmarks(controller.signal);
       if (!cancelled) setIsLoading(false);
     })();
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [enabled, skillGroups, fetchBenchmarks]);
 

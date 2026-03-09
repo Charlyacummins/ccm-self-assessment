@@ -9,12 +9,6 @@ import { CorpDashboardContent } from "@/components/corp-admin/corp-dashboard-con
 import { InsightsCard } from "@/components/corp-admin/insights-card";
 import { CORP_ADMIN_SELECTED_COHORT_COOKIE } from "@/lib/corp-admin-selected-cohort-cookie";
 
-interface BenchmarkRow {
-  mean_score: number | null;
-  total_possible_points: number | null;
-  n: number | null;
-}
-
 function InsightsSkeleton() {
   return (
     <Card>
@@ -88,9 +82,9 @@ export default async function CorpAdminDashboardPage() {
   const { data: templateSkills } = templateId
     ? await supabase
         .from("template_skills")
-        .select("skill_group_id")
+        .select("id, skill_group_id, max_points")
         .contains("meta_json", { template_ids: [templateId] })
-    : { data: [] as Array<{ skill_group_id: string | null }> };
+    : { data: [] as Array<{ id: string; skill_group_id: string | null; max_points: number | null }> };
 
   const skillGroupIds = [
     ...new Set(
@@ -100,86 +94,29 @@ export default async function CorpAdminDashboardPage() {
     ),
   ];
 
-  const { data: skillGroups } = skillGroupIds.length
-    ? await supabase
-        .from("template_skill_groups")
-        .select("id, name")
-        .in("id", skillGroupIds)
-        .order("name")
-    : { data: [] as { id: string; name: string }[] };
-
-  const corpBenchmarks: Record<string, BenchmarkRow> = {};
-
-  const [, totalMembersResult, reviewerCountResult, settingsResult, memberUserIdsResult] =
+  const [skillGroupsResult, totalMembersResult, reviewerCountResult, settingsResult, memberUserIdsResult] =
     await Promise.all([
-      (async () => {
-        if (
-          corpMembership?.corporation_id &&
-          cohortId &&
-          templateId &&
-          (skillGroups?.length ?? 0) > 0
-        ) {
-          await Promise.all(
-            (skillGroups ?? []).map(async (group) => {
-              const { data, error } = await supabase.rpc(
-                "rpc_corporate_skill_group_benchmark",
-                {
-                  p_corporation_id: corpMembership.corporation_id,
-                  p_cohort_id: cohortId,
-                  p_template_id: templateId,
-                  p_skill_group_id: group.id,
-                  p_submitted_year: null,
-                  p_country: null,
-                  p_industry: null,
-                  p_job_level: null,
-                  p_functional_area: null,
-                  p_role: null,
-                  p_region: null,
-                  p_sub_region: null,
-                  p_years_experience: null,
-                  p_education_level: null,
-                }
-              );
-              if (error) return;
-              const row = (data?.[0] ?? null) as BenchmarkRow | null;
-              if (row) corpBenchmarks[group.id] = row;
-            })
-          );
-        }
-      })(),
+      skillGroupIds.length
+        ? supabase.from("template_skill_groups").select("id, name").in("id", skillGroupIds).order("name")
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
       cohortId
-        ? supabase
-            .from("cohort_members")
-            .select("*", { count: "exact", head: true })
-            .eq("cohort_id", cohortId)
+        ? supabase.from("cohort_members").select("*", { count: "exact", head: true }).eq("cohort_id", cohortId)
         : Promise.resolve({ count: 0 }),
       cohortId
-        ? supabase
-            .from("cohort_members")
-            .select("*", { count: "exact", head: true })
-            .eq("cohort_id", cohortId)
-            .eq("role", "reviewer")
+        ? supabase.from("cohort_members").select("*", { count: "exact", head: true }).eq("cohort_id", cohortId).eq("role", "reviewer")
         : Promise.resolve({ count: 0 }),
       cohortId
-        ? supabase
-            .from("cohort_settings")
-            .select("reviewers_enabled")
-            .eq("cohort_id", cohortId)
-            .maybeSingle()
+        ? supabase.from("cohort_settings").select("reviewers_enabled").eq("cohort_id", cohortId).maybeSingle()
         : Promise.resolve({ data: null }),
       cohortId
-        ? supabase
-            .from("cohort_members")
-            .select("user_id")
-            .eq("cohort_id", cohortId)
-            .eq("role", "user")
+        ? supabase.from("cohort_members").select("user_id").eq("cohort_id", cohortId).eq("role", "user")
         : Promise.resolve({ data: [] as { user_id: string }[] }),
     ]);
 
+  const skillGroups = skillGroupsResult.data ?? [];
   const totalMembers = totalMembersResult.count ?? 0;
   const reviewerCount = reviewerCountResult.count ?? 0;
   const reviewersEnabled = settingsResult.data?.reviewers_enabled ?? false;
-
   const memberUserIds = (memberUserIdsResult.data ?? []).map((m) => m.user_id);
   const userCount = memberUserIds.length;
 
@@ -191,28 +128,87 @@ export default async function CorpAdminDashboardPage() {
         .in("status", ["submitted", "in_review", "reviewed", "completed"])
     : { count: 0 };
 
-  const skillGroupsWithScores = (skillGroups ?? []).map((sg) => {
-    const benchmark = corpBenchmarks[sg.id];
-    const mean = Number(benchmark?.mean_score ?? 0);
-    const totalPossible = Number(benchmark?.total_possible_points ?? 0);
-    return {
-      id: sg.id,
-      name: sg.name,
-      score: totalPossible > 0 ? Math.round((mean / totalPossible) * 100) : 0,
-    };
-  });
+  // Compute cohort group averages using the same logic as cohort-results route
+  const skillGroupsWithScores: { id: string; name: string; score: number }[] = skillGroups.map(
+    (sg) => ({ id: sg.id, name: sg.name, score: 0 })
+  );
 
-  const participantCount = Math.max(0, totalMembers - 1); // exclude the corp_admin
+  if (memberUserIds.length > 0 && (templateSkills ?? []).length > 0) {
+    const referenceTemplateSkillIds = (templateSkills ?? [])
+      .map((ts) => ts.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
 
-  const completionData = (skillGroups ?? []).map((sg) => {
-    const benchmark = corpBenchmarks[sg.id];
-    const n = Number(benchmark?.n ?? 0);
-    return {
-      id: sg.id,
-      name: sg.name,
-      score: participantCount > 0 ? Math.round((n / participantCount) * 100) : 0,
-    };
-  });
+    const { data: assessments } = await supabase
+      .from("assessments")
+      .select("id")
+      .in("user_id", memberUserIds)
+      .in("status", ["submitted", "in_review", "reviewed", "completed"]);
+
+    const assessmentIds = (assessments ?? []).map((a) => a.id).filter(Boolean);
+
+    if (assessmentIds.length > 0 && referenceTemplateSkillIds.length > 0) {
+      const { data: scoreRows } = await supabase
+        .from("assessment_skill_scores")
+        .select("assessment_id, reviewer_score, final_score, points, template_skill_id")
+        .in("assessment_id", assessmentIds)
+        .in("template_skill_id", referenceTemplateSkillIds);
+
+      // Build skill → group_id + max_points lookup
+      const skillMeta = new Map<string, { groupId: string; maxPoints: number }>();
+      for (const ts of templateSkills ?? []) {
+        if (ts.skill_group_id && ts.id) {
+          skillMeta.set(ts.id, { groupId: ts.skill_group_id, maxPoints: Number(ts.max_points ?? 0) });
+        }
+      }
+
+      // groupPossible: sum of max_points per group
+      const groupPossible = new Map<string, number>();
+      for (const ts of templateSkills ?? []) {
+        if (!ts.skill_group_id) continue;
+        groupPossible.set(ts.skill_group_id, (groupPossible.get(ts.skill_group_id) ?? 0) + Number(ts.max_points ?? 0));
+      }
+
+      // Aggregate per skill
+      const skillAgg = new Map<string, { groupId: string; total: number; assessmentIds: Set<string> }>();
+      for (const row of scoreRows ?? []) {
+        const scoreValue = (row as Record<string, unknown>).reviewer_score ?? (row as Record<string, unknown>).final_score ?? (row as Record<string, unknown>).points;
+        const finalScore = Number(scoreValue);
+        if (!Number.isFinite(finalScore)) continue;
+        const assessmentId = typeof (row as Record<string, unknown>).assessment_id === "string" ? (row as Record<string, unknown>).assessment_id as string : null;
+        const templateSkillId = typeof (row as Record<string, unknown>).template_skill_id === "string" ? (row as Record<string, unknown>).template_skill_id as string : null;
+        if (!assessmentId || !templateSkillId) continue;
+        const meta = skillMeta.get(templateSkillId);
+        if (!meta) continue;
+        const current = skillAgg.get(templateSkillId) ?? { groupId: meta.groupId, total: 0, assessmentIds: new Set<string>() };
+        current.total += finalScore;
+        current.assessmentIds.add(assessmentId);
+        skillAgg.set(templateSkillId, current);
+      }
+
+      // Compute group scores as sum of per-skill averages / totalPossible
+      const groupScore = new Map<string, number>();
+      for (const agg of skillAgg.values()) {
+        if (agg.assessmentIds.size === 0) continue;
+        const skillAvg = agg.total / agg.assessmentIds.size;
+        groupScore.set(agg.groupId, (groupScore.get(agg.groupId) ?? 0) + skillAvg);
+      }
+
+      for (const sg of skillGroupsWithScores) {
+        const score = groupScore.get(sg.id) ?? 0;
+        const possible = groupPossible.get(sg.id) ?? 0;
+        sg.score = possible > 0 ? Math.round((score / possible) * 100) : 0;
+      }
+    }
+  }
+
+  const participantCount = Math.max(0, totalMembers - 1);
+  const completionRate = participantCount > 0 ? Math.round(((completionCount ?? 0) / participantCount) * 100) : 0;
+
+  const completionData = skillGroups.map((sg) => ({
+    id: sg.id,
+    name: sg.name,
+    score: completionRate,
+  }));
 
   const hasResults = skillGroupsWithScores.some((d) => d.score > 0);
 
