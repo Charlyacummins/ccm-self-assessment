@@ -34,7 +34,7 @@ function PointsTooltip({
   chartConfig,
 }: {
   active?: boolean;
-  payload?: { dataKey: string; value: number; color: string }[];
+  payload?: { dataKey?: string | number; value?: number | string | (number | string)[]; color?: string }[];
   label?: string;
   chartConfig: ChartConfig;
 }) {
