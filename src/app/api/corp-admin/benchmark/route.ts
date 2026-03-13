@@ -11,10 +11,15 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const cohortId = searchParams.get("cohortId");
-  const skillGroupId = searchParams.get("skillGroupId");
 
-  if (!cohortId || !skillGroupId) {
-    return NextResponse.json({ error: "cohortId and skillGroupId are required" }, { status: 400 });
+  // Accept multiple skillGroupId params: ?skillGroupId=a&skillGroupId=b
+  const skillGroupIds = searchParams.getAll("skillGroupId");
+
+  if (!cohortId || skillGroupIds.length === 0) {
+    return NextResponse.json(
+      { error: "cohortId and at least one skillGroupId are required" },
+      { status: 400 }
+    );
   }
 
   const supabase = db();
@@ -28,9 +33,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }
 
+  // Verify admin owns this cohort
   const { data: cohort } = await supabase
     .from("cohorts")
-    .select("template_id")
+    .select("id")
     .eq("id", cohortId)
     .eq("admin_id", profile.id)
     .maybeSingle();
@@ -38,18 +44,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (!cohort.template_id) {
-    return NextResponse.json({ error: "Cohort missing template mapping" }, { status: 400 });
-  }
-
   const yearsExperience = await resolveYearsExperienceValue(
     supabase,
     searchParams.get("yearsExperience")
   );
 
-  const { data, error } = await supabase.rpc("rpc_skill_group_benchmark_v2", {
-    p_skill_group_id: skillGroupId,
-    p_cohort_template_id: cohort.template_id,
+  const rpcParams = {
+    p_skill_group_ids: skillGroupIds,
     p_submitted_year: searchParams.get("submittedYear")
       ? Number(searchParams.get("submittedYear"))
       : null,
@@ -62,12 +63,32 @@ export async function GET(req: Request) {
     p_sub_region: searchParams.get("subRegion") || null,
     p_years_experience: yearsExperience,
     p_education_level: searchParams.get("educationLevel") || null,
-  });
+  };
+
+  // Retry once on statement timeout — first load hits a cold materialized view
+  // cache; the second attempt succeeds once Postgres pages are in shared_buffers.
+  let data, error;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    ({ data, error } = await supabase.rpc(
+      "rpc_skill_group_benchmark_v2",
+      rpcParams
+    ));
+    if (!error || !error.message.includes("statement timeout")) break;
+    console.warn(
+      `[corp-admin/benchmark] statement timeout on attempt ${attempt + 1}, retrying…`
+    );
+  }
 
   if (error) {
     console.error("[corp-admin/benchmark]", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data?.[0] ?? null);
+  // Return a map keyed by skill_group_id
+  const result: Record<string, (typeof data)[number]> = {};
+  for (const row of data ?? []) {
+    result[row.skill_group_id] = row;
+  }
+
+  return NextResponse.json(result);
 }

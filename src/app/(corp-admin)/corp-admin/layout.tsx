@@ -1,7 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getUserRole } from "@/lib/get-user-role";
+import { getUserRoles } from "@/lib/get-user-roles";
+import { ACTIVE_ROLE_COOKIE } from "@/lib/active-role-cookie";
 import { RoleProvider } from "@/components/role-provider";
 import { CorpAdminHeader } from "@/components/corp-admin/corp-admin-header";
 import { Footer } from "@/components/footer";
@@ -19,7 +20,22 @@ export default async function CorpAdminLayout({
     redirect("/login");
   }
 
-  const role = await getUserRole(userId);
+  const { primaryRole: role, allRoles: userRoles } = await getUserRoles(userId);
+
+  const cookieStore2 = await cookies();
+  const activeRole = cookieStore2.get(ACTIVE_ROLE_COOKIE)?.value;
+
+  // Multi-role: if no cookie set yet, send to role selector
+  if (userRoles.length > 1 && !activeRole) {
+    redirect("/select-role");
+  }
+
+  // If cookie is set to something other than corp_admin, redirect accordingly
+  if (activeRole && activeRole !== "corp_admin") {
+    if (activeRole === "reviewer") redirect("/reviewer/dashboard");
+    if (activeRole === "admin") redirect("/admin/dashboard");
+    redirect("/dashboard");
+  }
 
   if (role !== "corp_admin") {
     if (role === "reviewer") redirect("/reviewer/dashboard");
@@ -27,8 +43,9 @@ export default async function CorpAdminLayout({
     redirect("/dashboard");
   }
 
-  const cookieStore = await cookies();
-  const selectedCohortId = cookieStore.get(CORP_ADMIN_SELECTED_COHORT_COOKIE)?.value ?? null;
+  const hasMultipleRoles = userRoles.length > 1;
+
+  const selectedCohortId = cookieStore2.get(CORP_ADMIN_SELECTED_COHORT_COOKIE)?.value ?? null;
   const supabase = db();
 
   const { data: profile } = await supabase
@@ -61,7 +78,7 @@ export default async function CorpAdminLayout({
   return (
     <RoleProvider role={role}>
       <div className="flex min-h-screen flex-col">
-        <CorpAdminHeader reviewersEnabled={reviewersEnabled} groupingEnabled={groupingEnabled} />
+        <CorpAdminHeader reviewersEnabled={reviewersEnabled} groupingEnabled={groupingEnabled} hasMultipleRoles={hasMultipleRoles} />
         <main className="mx-auto w-full max-w-screen-2xl flex-1 px-6 py-8">
           {isPaymentBlocked ? (
             <div className="rounded-lg border border-[#004070]/20 bg-[#004070]/5 p-6">

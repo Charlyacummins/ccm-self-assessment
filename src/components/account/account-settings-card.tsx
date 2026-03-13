@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -9,6 +9,7 @@ export type AccountSettingsData = {
   dashboardOption: "insights" | "assessments";
   percentageBasedScoring: boolean;
   benchmarkDefault: "global" | "country";
+  countryId: number | null;
 };
 
 export function AccountSettingsCard({
@@ -20,13 +21,24 @@ export function AccountSettingsCard({
   const [form, setForm] = useState<AccountSettingsData>(initialData);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [countries, setCountries] = useState<{ id: number; name: string }[]>([]);
+
+  useEffect(() => {
+    if (form.benchmarkDefault === "country" && countries.length === 0) {
+      fetch("/api/account/countries")
+        .then((r) => r.json())
+        .then((data) => setCountries(data ?? []))
+        .catch(() => {});
+    }
+  }, [form.benchmarkDefault, countries.length]);
 
   const hasChanges = useMemo(
     () =>
       form.summaryReportMode !== savedForm.summaryReportMode ||
       form.dashboardOption !== savedForm.dashboardOption ||
       form.percentageBasedScoring !== savedForm.percentageBasedScoring ||
-      form.benchmarkDefault !== savedForm.benchmarkDefault,
+      form.benchmarkDefault !== savedForm.benchmarkDefault ||
+      form.countryId !== savedForm.countryId,
     [form, savedForm]
   );
 
@@ -205,6 +217,25 @@ export function AccountSettingsCard({
                     Country
                   </label>
                 </div>
+                {form.benchmarkDefault === "country" && (
+                  <select
+                    value={form.countryId ?? ""}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        countryId: e.target.value ? parseInt(e.target.value) : null,
+                      }))
+                    }
+                    className="mt-2 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-[#004070] focus:outline-none focus:ring-1 focus:ring-[#00ABEB]"
+                  >
+                    <option value="">Select a country…</option>
+                    {countries.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             </div>
           </div>

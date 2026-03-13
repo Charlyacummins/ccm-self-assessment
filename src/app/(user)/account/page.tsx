@@ -51,7 +51,7 @@ export default async function AccountPage() {
   const { data: settings } = await supabase
     .from("user_settings")
     .select(
-      "summary_report_mode, dashboard_option, percentage_based_scoring, benchmark_default"
+      "summary_report_mode, dashboard_option, percentage_based_scoring, benchmark_default, country_id"
     )
     .eq("user_id", profile.id)
     .maybeSingle();
@@ -61,6 +61,7 @@ export default async function AccountPage() {
     dashboardOption: settings?.dashboard_option ?? "insights",
     percentageBasedScoring: settings?.percentage_based_scoring ?? true,
     benchmarkDefault: settings?.benchmark_default ?? "global",
+    countryId: settings?.country_id ?? null,
   };
 
   return (

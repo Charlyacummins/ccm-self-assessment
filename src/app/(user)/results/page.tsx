@@ -148,6 +148,30 @@ export default async function Results() {
   // Feedback text (placeholder until reviewer feedback is built)
   const feedbackText = "";
 
+  let percentageBasedScoring = true;
+  let initialFilters: Record<string, string> | undefined;
+
+  if (profile) {
+    const { data: settings } = await supabase
+      .from("user_settings")
+      .select("percentage_based_scoring, benchmark_default, country_id")
+      .eq("user_id", profile.id)
+      .maybeSingle();
+
+    percentageBasedScoring = settings?.percentage_based_scoring ?? true;
+
+    if (settings?.benchmark_default === "country" && settings?.country_id) {
+      const { data: country } = await supabase
+        .from("countries")
+        .select("country_name")
+        .eq("country_id", settings.country_id)
+        .maybeSingle();
+      if (country?.country_name) {
+        initialFilters = { country: country.country_name };
+      }
+    }
+  }
+
   if (corporationId && cohortId) {
     return (
       <CorpResultsPage
@@ -158,6 +182,8 @@ export default async function Results() {
         skillGroupResults={skillGroupResults}
         skillScores={skillScores}
         feedbackText={feedbackText}
+        percentageBasedScoring={percentageBasedScoring}
+        initialFilters={initialFilters}
       />
     );
   }
@@ -169,6 +195,8 @@ export default async function Results() {
       skillGroupResults={skillGroupResults}
       skillScores={skillScores}
       feedbackText={feedbackText}
+      percentageBasedScoring={percentageBasedScoring}
+      initialFilters={initialFilters}
     />
   );
 }

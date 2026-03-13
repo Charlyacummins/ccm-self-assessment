@@ -13,7 +13,7 @@ const navLinks = [
   { href: "/account", label: "Account" },
 ];
 
-export function UserHeader() {
+export function UserHeader({ hasMultipleRoles = false }: { hasMultipleRoles?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -47,6 +47,14 @@ export function UserHeader() {
               </Link>
             );
           })}
+          {hasMultipleRoles && (
+            <Link
+              href="/select-role"
+              className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-[#004070] hover:border-[#00ABEB] hover:text-[#00ABEB]"
+            >
+              Switch Role
+            </Link>
+          )}
           <UserButton />
         </nav>
       </div>

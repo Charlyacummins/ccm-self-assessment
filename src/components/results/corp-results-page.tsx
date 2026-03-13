@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Users } from "lucide-react";
 import {
   AssessmentResultsChart,
   type SkillGroupResult,
@@ -14,6 +13,7 @@ import {
   ResultsSkillSidebar,
   type SkillScore,
 } from "./results-skill-sidebar";
+import { CohortFilterPanel } from "./cohort-filter-panel";
 
 interface CorpResultsPageProps {
   hasResults: boolean;
@@ -25,11 +25,10 @@ interface CorpResultsPageProps {
   feedbackText: string;
   emptyResultsMessage?: string;
   emptyFeedbackMessage?: string;
+  onCohortFiltersChange?: (filters: Record<string, string>) => void;
+  percentageBasedScoring?: boolean;
+  initialFilters?: Record<string, string>;
 }
-
-const GROUP_DEMOGRAPHIC = [
-  { key: "cohortGroup", label: "Group", icon: Users },
-];
 
 export function CorpResultsPage({
   hasResults,
@@ -41,10 +40,12 @@ export function CorpResultsPage({
   feedbackText,
   emptyResultsMessage,
   emptyFeedbackMessage,
+  onCohortFiltersChange,
+  percentageBasedScoring = true,
+  initialFilters,
 }: CorpResultsPageProps) {
-  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [filters, setFilters] = useState<Record<string, string>>(initialFilters ?? {});
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [showReviewerScores, setShowReviewerScores] = useState(false);
 
   const { data: benchmarks, isLoading: benchmarksLoading } = useCorporateBenchmarks({
     skillGroups: skillGroupResults,
@@ -55,9 +56,6 @@ export function CorpResultsPage({
     type: "global",
     enabled: hasResults,
   });
-
-  // TODO: wire up reviewer scores from API when available
-  const reviewerScores: Record<string, number> = {};
 
   const selectedGroup = skillGroupResults.find(
     (group) => group.id === selectedGroupId
@@ -78,24 +76,20 @@ export function CorpResultsPage({
         filters={filters}
         onSelectGroup={(groupId) => setSelectedGroupId(groupId)}
         benchmarks={benchmarks}
-        reviewerScores={reviewerScores}
-        showReviewerScores={showReviewerScores}
         emptyStateMessage={emptyResultsMessage}
         subjectLabel="Cohort"
-        keyBarSlot={
-          <CorpChartKeyBar
-            showReviewerScores={showReviewerScores}
-            onToggleReviewerScores={setShowReviewerScores}
-            subjectLabel="Cohort"
+        keyBarSlot={<CorpChartKeyBar subjectLabel="Cohort" />}
+        filterSlot={
+          <CohortFilterPanel
+            cohortId={cohortId}
+            onApply={(f) => { setFilters(f); onCohortFiltersChange?.(f); }}
+            embedded
           />
         }
+        percentageBasedScoring={percentageBasedScoring}
       />
 
-      <BenchmarkOptions
-        onApply={setFilters}
-        extraDemographics={GROUP_DEMOGRAPHIC}
-        showDateRange
-      />
+      <BenchmarkOptions onApply={setFilters} showDateRange initialValues={initialFilters} />
 
       <AssessmentFeedback
         hasResults={hasResults}

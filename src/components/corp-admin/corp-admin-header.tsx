@@ -11,8 +11,8 @@ const navLinks = [
   { href: "/corp-admin/manage-assessments", label: "Manage Assessments", dropdown: false },
   { href: "/corp-admin/results", label: "Results", dropdown: false },
   { href: null, label: "ROSTERS_DROPDOWN", dropdown: false },
-  { href: null, label: "Support", dropdown: true },
-  { href: null, label: "Account", dropdown: true },
+  { href: "/corp-admin/support", label: "Support", dropdown: false },
+  { href: "/corp-admin/account", label: "Account", dropdown: false },
 ];
 
 const rostersDropdown = [
@@ -25,9 +25,11 @@ const rostersDropdown = [
 export function CorpAdminHeader({
   reviewersEnabled = false,
   groupingEnabled = false,
+  hasMultipleRoles = false,
 }: {
   reviewersEnabled?: boolean;
   groupingEnabled?: boolean;
+  hasMultipleRoles?: boolean;
 }) {
   const pathname = usePathname();
   const filteredRostersDropdown = rostersDropdown.filter((item) => {
@@ -110,6 +112,14 @@ export function CorpAdminHeader({
             );
           })}
 
+          {hasMultipleRoles && (
+            <Link
+              href="/select-role"
+              className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-[#004070] hover:border-[#00ABEB] hover:text-[#00ABEB]"
+            >
+              Switch Role
+            </Link>
+          )}
           <UserButton />
         </nav>
       </div>

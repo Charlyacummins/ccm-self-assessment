@@ -102,44 +102,51 @@ export function useCorporateBenchmarks({
       return;
     }
 
-    await Promise.all(
-      toFetch.map(async (sg) => {
-        if (signal?.aborted) return;
-
-        const params =
-          type === "global"
-            ? new URLSearchParams({ cohortId, skillGroupId: sg.id, ...filters })
-            : new URLSearchParams({
-                corporationId,
-                cohortId,
-                templateId,
-                skillGroupId: sg.id,
-                ...filters,
-              });
-
-        const endpoint =
-          type === "global"
-            ? `/api/corp-admin/benchmark`
-            : `/api/assessment/corporate-benchmark`;
-
+    if (type === "global") {
+      // Batch all skill groups into a single request
+      if (!signal?.aborted) {
+        const params = new URLSearchParams({ cohortId, ...filters });
+        toFetch.forEach((sg) => params.append("skillGroupId", sg.id));
         try {
-          const res = await fetch(
-            `${endpoint}?${params}`,
-            signal ? { signal } : undefined
-          );
-          if (signal?.aborted) return;
-          const data = await res.json();
-          const value = data && !data.error ? (data as BenchmarkData) : null;
-          const key = getCacheKey(type, corporationId, cohortId, sg.id, filterKey);
-          writeCache(key, value);
-          if (value) {
-            results[sg.id] = value;
+          const res = await fetch(`/api/corp-admin/benchmark?${params}`, signal ? { signal } : undefined);
+          if (!signal?.aborted) {
+            const dataMap = await res.json() as Record<string, BenchmarkData>;
+            for (const sg of toFetch) {
+              const value = dataMap[sg.id] && !("error" in dataMap) ? dataMap[sg.id] : null;
+              const key = getCacheKey(type, corporationId, cohortId, sg.id, filterKey);
+              writeCache(key, value);
+              if (value) results[sg.id] = value;
+            }
           }
         } catch {
           // ignore fetch errors
         }
-      })
-    );
+      }
+    } else {
+      await Promise.all(
+        toFetch.map(async (sg) => {
+          if (signal?.aborted) return;
+          const params = new URLSearchParams({
+            corporationId,
+            cohortId,
+            templateId,
+            skillGroupId: sg.id,
+            ...filters,
+          });
+          try {
+            const res = await fetch(`/api/assessment/corporate-benchmark?${params}`, signal ? { signal } : undefined);
+            if (signal?.aborted) return;
+            const data = await res.json();
+            const value = data && !data.error ? (data as BenchmarkData) : null;
+            const key = getCacheKey(type, corporationId, cohortId, sg.id, filterKey);
+            writeCache(key, value);
+            if (value) results[sg.id] = value;
+          } catch {
+            // ignore fetch errors
+          }
+        })
+      );
+    }
 
     if (signal?.aborted) return;
     setBenchmarks(results);

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -99,7 +100,11 @@ export function UsersContent({ templateOptions }: { templateOptions: TemplateOpt
   const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteGroup, setInviteGroup] = useState("");
-  const [inviteDept, setInviteDept] = useState("");
+  const [inviteMode, setInviteMode] = useState<"single" | "bulk">("single");
+  const [csvRows, setCsvRows] = useState<{ name: string; email: string }[]>([]);
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkResults, setBulkResults] = useState<{ sent: number; skipped: number; failed: number } | null>(null);
 
   const selectedOption = templateOptions.find((option) => option.value === cohortId);
   const corporationId = selectedOption?.corporationId ?? "";
@@ -235,7 +240,6 @@ export function UsersContent({ templateOptions }: { templateOptions: TemplateOpt
 
       setInviteName("");
       setInviteEmail("");
-      setInviteDept("");
       setInviteGroup("");
       await loadUsers();
     } catch (error) {
@@ -243,6 +247,58 @@ export function UsersContent({ templateOptions }: { templateOptions: TemplateOpt
     } finally {
       setInviteSaving(false);
     }
+  };
+
+  const handleCsvFile = (file: File) => {
+    setCsvError(null);
+    setCsvRows([]);
+    setBulkResults(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (lines.length === 0) { setCsvError("File is empty."); return; }
+
+      // Skip header row if it looks like a header (no "@" in first field)
+      const firstCols = lines[0].split(",").map((c) => c.trim());
+      const startIdx = firstCols[0] && !firstCols[0].includes("@") && !/^\d/.test(firstCols[0]) && firstCols[1] && !firstCols[1].includes("@")
+        ? 1 : 0;
+
+      const parsed: { name: string; email: string }[] = [];
+      for (const line of lines.slice(startIdx)) {
+        const [rawName, rawEmail] = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+        if (!rawEmail || !rawEmail.includes("@")) continue;
+        parsed.push({ name: rawName ?? "", email: rawEmail });
+      }
+
+      if (parsed.length === 0) { setCsvError("No valid rows found. Expected columns: name, email"); return; }
+      setCsvRows(parsed);
+    };
+    reader.onerror = () => setCsvError("Failed to read file.");
+    reader.readAsText(file);
+  };
+
+  const handleBulkInvite = async () => {
+    if (!cohortId || !corporationId || csvRows.length === 0) return;
+    setBulkSaving(true);
+    setBulkResults(null);
+    let sent = 0, skipped = 0, failed = 0;
+    for (const row of csvRows) {
+      try {
+        const res = await fetch("/api/corp-admin/cohort-invites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cohortId, corporationId, email: row.email, name: row.name, role: "user", resend: false }),
+        });
+        const payload = await res.json() as { status?: string; error?: string };
+        if (!res.ok) { failed++; continue; }
+        if (payload.status === "invited" || payload.status === "added_member") sent++;
+        else skipped++;
+      } catch { failed++; }
+    }
+    setBulkResults({ sent, skipped, failed });
+    setBulkSaving(false);
+    if (sent > 0) await loadUsers();
   };
 
   const handleResendInvite = async () => {
@@ -596,73 +652,151 @@ export function UsersContent({ templateOptions }: { templateOptions: TemplateOpt
       {/* Invite user form */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-center text-base text-[#004070]">Invite User</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base text-[#004070]">Invite User</CardTitle>
+            <div className="inline-flex gap-1 rounded-lg bg-gray-100 p-1">
+              <button
+                onClick={() => setInviteMode("single")}
+                className={`rounded-md px-3 py-1 text-xs font-medium text-[#004070] transition-colors ${inviteMode === "single" ? "bg-white shadow-sm" : "hover:bg-gray-200"}`}
+              >
+                Single
+              </button>
+              <button
+                onClick={() => { setInviteMode("bulk"); setCsvRows([]); setCsvError(null); setBulkResults(null); }}
+                className={`rounded-md px-3 py-1 text-xs font-medium text-[#004070] transition-colors ${inviteMode === "bulk" ? "bg-white shadow-sm" : "hover:bg-gray-200"}`}
+              >
+                Bulk CSV
+              </button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[#004070]">Name</label>
-              <Input
-                placeholder="Full name"
-                value={inviteName}
-                onChange={(e) => setInviteName(e.target.value)}
-                className="text-xs"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[#004070]">Email</label>
-              <Input
-                placeholder="example@acme.com"
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                className="text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[#004070]">Department <span className="text-muted-foreground">(Optional)</span></label>
-              <div className="relative">
-                <select
-                  value={inviteDept}
-                  onChange={(e) => setInviteDept(e.target.value)}
-                  className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-xs text-[#004070] focus:outline-none focus:ring-2 focus:ring-[#00ABEB]"
-                >
-                  <option value="">Select</option>
-                </select>
-                <ChevronsUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          {inviteMode === "single" ? (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#004070]">Name</label>
+                  <Input
+                    placeholder="Full name"
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    className="text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#004070]">Email</label>
+                  <Input
+                    placeholder="example@acme.com"
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="text-xs"
+                  />
+                </div>
               </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[#004070]">Group <span className="text-muted-foreground">(Optional)</span></label>
-              <div className="relative">
-                <select
-                  value={inviteGroup}
-                  onChange={(e) => setInviteGroup(e.target.value)}
-                  className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-xs text-[#004070] focus:outline-none focus:ring-2 focus:ring-[#00ABEB]"
-                >
-                  <option value="">Select</option>
-                </select>
-                <ChevronsUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              </div>
-            </div>
-          </div>
 
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              disabled={inviteSaving || !cohortId || !corporationId}
-              onClick={handleInvite}
-              className="bg-[#004070] px-8 text-white hover:bg-[#003560]"
-            >
-              Invite
-            </Button>
-          </div>
-          {inviteMessage ? (
-            <p className="text-xs text-[#004070]">{inviteMessage}</p>
-          ) : null}
+              <div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#004070]">Group <span className="text-muted-foreground">(Optional)</span></label>
+                  <div className="relative">
+                    <select
+                      value={inviteGroup}
+                      onChange={(e) => setInviteGroup(e.target.value)}
+                      className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-xs text-[#004070] focus:outline-none focus:ring-2 focus:ring-[#00ABEB]"
+                    >
+                      <option value="">Select</option>
+                    </select>
+                    <ChevronsUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  disabled={inviteSaving || !cohortId || !corporationId}
+                  onClick={handleInvite}
+                  className="bg-[#004070] px-8 text-white hover:bg-[#003560]"
+                >
+                  Invite
+                </Button>
+              </div>
+              {inviteMessage ? (
+                <p className="text-xs text-[#004070]">
+                  {inviteMessage}{" "}
+                  <Link href="/corp-admin/pending-invitations" className="underline hover:text-[#00ABEB]">
+                    Go to Pending Invites
+                  </Link>{" "}
+                  to view or edit any invitations.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground">
+                  Upload a CSV with two columns: <span className="font-medium text-[#004070]">name</span> and <span className="font-medium text-[#004070]">email</span>. A header row is optional.
+                </p>
+                <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[#00ABEB]/40 px-4 py-6 text-xs text-muted-foreground transition-colors hover:border-[#00ABEB] hover:bg-[#00ABEB]/5">
+                  <Download className="h-5 w-5 text-[#00ABEB]" />
+                  <span>Click to select a CSV file</span>
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCsvFile(f); e.target.value = ""; }}
+                  />
+                </label>
+                {csvError && <p className="text-xs text-red-500">{csvError}</p>}
+              </div>
+
+              {csvRows.length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-xs font-medium text-[#004070]">{csvRows.length} row{csvRows.length !== 1 ? "s" : ""} ready to invite</p>
+                  <div className="max-h-48 overflow-y-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Name</TableHead>
+                          <TableHead className="text-xs">Email</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {csvRows.map((row, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-xs text-[#004070]">{row.name || <span className="text-muted-foreground">—</span>}</TableCell>
+                            <TableCell className="text-xs text-[#004070]">{row.email}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      disabled={bulkSaving || !cohortId || !corporationId}
+                      onClick={handleBulkInvite}
+                      className="bg-[#004070] px-8 text-white hover:bg-[#003560]"
+                    >
+                      {bulkSaving ? "Inviting…" : `Invite ${csvRows.length}`}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {bulkResults && (
+                <p className="text-xs text-[#004070]">
+                  Done — {bulkResults.sent} invited
+                  {bulkResults.skipped > 0 ? `, ${bulkResults.skipped} skipped (already invited/member)` : ""}
+                  {bulkResults.failed > 0 ? `, ${bulkResults.failed} failed` : ""}.{" "}
+                  <Link href="/corp-admin/pending-invitations" className="underline hover:text-[#00ABEB]">
+                    Go to Pending Invites
+                  </Link>{" "}
+                  to view or edit any invitations.
+                </p>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

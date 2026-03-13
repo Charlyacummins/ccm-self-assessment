@@ -13,6 +13,7 @@ type CohortResultsPayload = {
   templateId: string;
   corporationId: string;
   cohortId: string;
+  individualResultVisibility: boolean;
   skillGroupResults: SkillGroupResult[];
   skillScores: SkillScore[];
   feedbackText: string;
@@ -52,9 +53,13 @@ function CohortSelector({
 export function AdminResultsContent({
   templateOptions,
   initialSelectedCohortId,
+  percentageBasedScoring = true,
+  initialBenchmarkFilters,
 }: {
   templateOptions: TemplateOption[];
   initialSelectedCohortId?: string | null;
+  percentageBasedScoring?: boolean;
+  initialBenchmarkFilters?: Record<string, string>;
 }) {
   const initialCohortId =
     initialSelectedCohortId &&
@@ -63,6 +68,7 @@ export function AdminResultsContent({
       : (templateOptions[0]?.value ?? "");
 
   const [cohortId, setCohortId] = useState(initialCohortId);
+  const [cohortFilters, setCohortFilters] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CohortResultsPayload | null>(null);
@@ -75,7 +81,8 @@ export function AdminResultsContent({
 
     setLoading(true);
     setError(null);
-    fetch(`/api/corp-admin/cohort-results?cohortId=${cohortId}`)
+    const params = new URLSearchParams({ cohortId, ...cohortFilters });
+    fetch(`/api/corp-admin/cohort-results?${params}`)
       .then(async (res) => {
         const payload = (await res.json()) as CohortResultsPayload & { error?: string };
         if (!res.ok) throw new Error(payload.error ?? "Failed to load results");
@@ -86,7 +93,7 @@ export function AdminResultsContent({
         setError(err instanceof Error ? err.message : "Failed to load results");
       })
       .finally(() => setLoading(false));
-  }, [cohortId]);
+  }, [cohortId, cohortFilters]);
 
   const handleCohortChange = (nextCohortId: string) => {
     setCohortId(nextCohortId);
@@ -101,7 +108,7 @@ export function AdminResultsContent({
     <div className="space-y-6">
       <CohortSelector options={templateOptions} value={cohortId} onChange={handleCohortChange} />
 
-      {loading ? (
+      {loading && !data ? (
         <div className="rounded-lg border bg-white p-10 text-center text-sm text-muted-foreground">
           Loading results...
         </div>
@@ -114,17 +121,25 @@ export function AdminResultsContent({
           Select a cohort to view results.
         </div>
       ) : (
-        <CorpResultsPage
-          hasResults={data.hasResults}
-          templateId={data.templateId}
-          corporationId={data.corporationId}
-          cohortId={data.cohortId}
-          skillGroupResults={data.skillGroupResults}
-          skillScores={data.skillScores}
-          feedbackText={data.feedbackText}
-          emptyResultsMessage="Once users in your cohort have completed assessments, results will show here."
-          emptyFeedbackMessage="Once users in your cohort have completed assessments, results will show here."
-        />
+        <div className="relative">
+          {loading && (
+            <div className="absolute inset-0 z-10 rounded-lg bg-white/60" />
+          )}
+          <CorpResultsPage
+            hasResults={data.hasResults}
+            templateId={data.templateId}
+            corporationId={data.corporationId}
+            cohortId={data.cohortId}
+            skillGroupResults={data.skillGroupResults}
+            skillScores={data.skillScores}
+            feedbackText={data.feedbackText}
+            emptyResultsMessage="Once users in your cohort have completed assessments, results will show here."
+            emptyFeedbackMessage="Once users in your cohort have completed assessments, results will show here."
+            onCohortFiltersChange={setCohortFilters}
+            percentageBasedScoring={percentageBasedScoring}
+            initialFilters={initialBenchmarkFilters}
+          />
+        </div>
       )}
     </div>
   );

@@ -76,7 +76,35 @@ export async function GET(req: Request) {
         .order("name")
     : { data: [] as Array<{ id: string; name: string }> };
 
-  const userIds = (members ?? []).map((m) => m.user_id).filter(Boolean);
+  const allUserIds = (members ?? []).map((m) => m.user_id).filter(Boolean) as string[];
+
+  // Fetch cohort settings
+  const { data: settings } = await supabase
+    .from("cohort_settings")
+    .select("individual_result_visibility, grouping_enabled")
+    .eq("cohort_id", cohortId)
+    .maybeSingle();
+  const individualResultVisibility = settings?.individual_result_visibility ?? false;
+  const groupingEnabled = settings?.grouping_enabled ?? false;
+
+  const groupId = searchParams.get("groupId");
+  const profileId = searchParams.get("profileId");
+
+  let userIds: string[] = allUserIds;
+
+  if (profileId && individualResultVisibility) {
+    userIds = allUserIds.includes(profileId) ? [profileId] : [];
+  } else if (groupId && groupingEnabled) {
+    const { data: groupMembers } = await supabase
+      .from("cohort_members")
+      .select("user_id")
+      .eq("cohort_id", cohortId)
+      .eq("group_id", groupId)
+      .eq("role", "user");
+    const groupUserIds = new Set((groupMembers ?? []).map((m) => m.user_id).filter(Boolean));
+    userIds = allUserIds.filter((id) => groupUserIds.has(id));
+  }
+
   const referenceTemplateSkillIds = (templateSkills ?? [])
     .map((row) => row.id)
     .filter((id): id is string => typeof id === "string" && id.length > 0);
@@ -93,6 +121,7 @@ export async function GET(req: Request) {
       templateId,
       corporationId,
       cohortId,
+      individualResultVisibility,
       skillGroupResults: emptyResults,
       skillScores: [] satisfies SkillScore[],
       feedbackText: "",
@@ -195,6 +224,7 @@ export async function GET(req: Request) {
     templateId,
     corporationId,
     cohortId,
+    individualResultVisibility,
     skillGroupResults,
     skillScores,
     feedbackText: "",

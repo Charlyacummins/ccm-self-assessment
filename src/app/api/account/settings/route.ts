@@ -23,7 +23,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("user_settings")
     .select(
-      "summary_report_mode, dashboard_option, percentage_based_scoring, benchmark_default"
+      "summary_report_mode, dashboard_option, percentage_based_scoring, benchmark_default, country_id"
     )
     .eq("user_id", profile.id)
     .maybeSingle();
@@ -37,6 +37,7 @@ export async function GET() {
     dashboardOption: data?.dashboard_option ?? "insights",
     percentageBasedScoring: data?.percentage_based_scoring ?? true,
     benchmarkDefault: data?.benchmark_default ?? "global",
+    countryId: data?.country_id ?? null,
   });
 }
 
@@ -52,6 +53,7 @@ export async function POST(req: Request) {
     dashboardOption,
     percentageBasedScoring,
     benchmarkDefault,
+    countryId,
   } = body ?? {};
 
   const supabase = db();
@@ -73,6 +75,7 @@ export async function POST(req: Request) {
       dashboard_option: dashboardOption ?? "insights",
       percentage_based_scoring: percentageBasedScoring ?? true,
       benchmark_default: benchmarkDefault ?? "global",
+      country_id: countryId ?? null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" }

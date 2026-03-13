@@ -8,9 +8,10 @@ import { UserButton } from "@clerk/nextjs";
 const navLinks = [
   { href: "/reviewer/dashboard", label: "Dashboard" },
   { href: "/reviewer/submissions", label: "Submissions" },
+  { href: "/reviewer/support", label: "Support" },
 ];
 
-export function ReviewerHeader() {
+export function ReviewerHeader({ hasMultipleRoles = false }: { hasMultipleRoles?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -46,6 +47,14 @@ export function ReviewerHeader() {
               </Link>
             );
           })}
+          {hasMultipleRoles && (
+            <Link
+              href="/select-role"
+              className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-[#004070] hover:border-[#00ABEB] hover:text-[#00ABEB]"
+            >
+              Switch Role
+            </Link>
+          )}
           <UserButton />
         </nav>
       </div>

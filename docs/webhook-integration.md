@@ -142,6 +142,10 @@ Creates a corporation, provisions an admin user, and creates their initial cohor
 - `admin_user.external_id` is stored on both `corp_memberships.external_id` and `profiles.external_id` for identity linkage.
 - `cohortId` (internal UUID) is returned and can be stored by your system for subsequent Seat Update / Payment calls.
 - A corp admin may have multiple cohorts over time. `cohortId` must be stored per cohort, not per admin.
+- When a new admin Clerk user is created, the system sends a first-login onboarding email to `admin_user.email` with a link to the app login page.
+- If the admin already exists (matched by email), the onboarding email is not re-sent by Provision Admin.
+- Email delivery is best-effort and does not change webhook success semantics; the endpoint can still return `200` even if email sending fails.
+- No request payload changes are required for this behavior.
 
 ---
 

@@ -1,6 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { ROLE_PRIORITY } from "@/lib/active-role-cookie";
 
 type InviteRole = "user" | "reviewer";
 type InviteRoleFilter = InviteRole | "all";
@@ -88,31 +89,45 @@ async function upsertResolvedMemberships(params: {
   } = params;
 
   const orgRole = role === "reviewer" ? "reviewer" : "user";
-  const { error: orgMembershipError } = await supabase
+
+  // Only upsert org_memberships if the new role is same or higher privilege than existing
+  const { data: existingOrgMembership } = await supabase
     .from("org_memberships")
-    .upsert(
-      {
-        user_id: profileId,
-        org_id: organizationId,
-        role: orgRole,
-      },
-      { onConflict: "user_id,org_id" }
-    );
+    .select("role")
+    .eq("user_id", profileId)
+    .eq("org_id", organizationId)
+    .maybeSingle();
 
-  if (orgMembershipError) throw new Error(orgMembershipError.message);
+  const existingPriority = ROLE_PRIORITY[existingOrgMembership?.role ?? ""] ?? 0;
+  const newPriority = ROLE_PRIORITY[orgRole] ?? 0;
 
-  const { error: corpMembershipError } = await supabase
+  if (newPriority >= existingPriority) {
+    const { error: orgMembershipError } = await supabase
+      .from("org_memberships")
+      .upsert(
+        { user_id: profileId, org_id: organizationId, role: orgRole },
+        { onConflict: "user_id,org_id" }
+      );
+    if (orgMembershipError) throw new Error(orgMembershipError.message);
+  }
+
+  const { data: existingCorpMembership } = await supabase
     .from("corp_memberships")
-    .upsert(
-      {
-        user_id: profileId,
-        corporation_id: corporationId,
-        role: "employee",
-      },
-      { onConflict: "user_id,corporation_id" }
-    );
+    .select("role")
+    .eq("user_id", profileId)
+    .eq("corporation_id", corporationId)
+    .maybeSingle();
 
-  if (corpMembershipError) throw new Error(corpMembershipError.message);
+  // Don't downgrade an existing corp_admin (or other high-privilege) corp membership to employee
+  if (existingCorpMembership?.role !== "corp_admin") {
+    const { error: corpMembershipError } = await supabase
+      .from("corp_memberships")
+      .upsert(
+        { user_id: profileId, corporation_id: corporationId, role: "employee" },
+        { onConflict: "user_id,corporation_id" }
+      );
+    if (corpMembershipError) throw new Error(corpMembershipError.message);
+  }
 
   const { data: existingCohortMember, error: existingCohortMemberError } = await supabase
     .from("cohort_members")
@@ -124,16 +139,22 @@ async function upsertResolvedMemberships(params: {
   if (existingCohortMemberError) throw new Error(existingCohortMemberError.message);
 
   if (existingCohortMember) {
-    const { error: updateCohortMemberError } = await supabase
-      .from("cohort_members")
-      .update({
-        role,
-        added_by: addedBy,
-      })
-      .eq("cohort_id", cohortId)
-      .eq("user_id", profileId);
-
-    if (updateCohortMemberError) throw new Error(updateCohortMemberError.message);
+    if (existingCohortMember.role === "corp_admin") {
+      // Don't overwrite their admin role — mark as also_participant instead
+      const { error: participantError } = await supabase
+        .from("cohort_members")
+        .update({ also_participant: true, participant_type: role })
+        .eq("cohort_id", cohortId)
+        .eq("user_id", profileId);
+      if (participantError) throw new Error(participantError.message);
+    } else {
+      const { error: updateCohortMemberError } = await supabase
+        .from("cohort_members")
+        .update({ role, added_by: addedBy })
+        .eq("cohort_id", cohortId)
+        .eq("user_id", profileId);
+      if (updateCohortMemberError) throw new Error(updateCohortMemberError.message);
+    }
     return;
   }
 

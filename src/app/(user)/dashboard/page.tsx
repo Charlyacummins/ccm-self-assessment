@@ -7,6 +7,7 @@ import { LearningPaths } from "@/components/dashboard/learning-paths";
 import { ScoresByCategory } from "@/components/dashboard/scores-by-category";
 import { StartQuestionnaire } from "@/components/dashboard/start-questionnaire";
 import { UpcomingWebinars } from "@/components/dashboard/upcoming-webinars";
+import { AssessmentHistoryTable } from "@/components/dashboard/assessment-history-table";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -119,10 +120,12 @@ async function ScoresByCategoryServer({
   profileId,
   templateId,
   skillGroups,
+  percentageBasedScoring,
 }: {
   profileId: string;
   templateId: string;
   skillGroups: SkillGroup[];
+  percentageBasedScoring: boolean;
 }) {
   const { hasResults, scoresByGroupId } = await fetchUserScoreData(profileId, templateId);
   const skillGroupsWithScores = skillGroups.map((sg) => {
@@ -130,9 +133,11 @@ async function ScoresByCategoryServer({
     return {
       ...sg,
       score: agg && agg.totalPossible > 0 ? Math.round((agg.total / agg.totalPossible) * 100) : 0,
+      rawScore: agg?.total,
+      maxPossible: agg?.totalPossible,
     };
   });
-  return <ScoresByCategory skillGroups={skillGroupsWithScores} hasResults={hasResults} />;
+  return <ScoresByCategory skillGroups={skillGroupsWithScores} hasResults={hasResults} percentageBasedScoring={percentageBasedScoring} />;
 }
 
 export default async function Dashboard() {
@@ -189,9 +194,19 @@ export default async function Dashboard() {
 
   const groups = skillGroups ?? [];
 
+  const { data: userSettings } = profile
+    ? await supabase
+        .from("user_settings")
+        .select("dashboard_option, percentage_based_scoring")
+        .eq("user_id", profile.id)
+        .maybeSingle()
+    : { data: null };
+  const dashboardOption = userSettings?.dashboard_option ?? "insights";
+  const percentageBasedScoring = userSettings?.percentage_based_scoring ?? true;
+
   return (
     <div className="space-y-6">
-      {/* Top row: Results at a glance + Learning Paths */}
+      {/* Top row: Results at a glance + Insights/Learning Paths */}
       <div className="grid gap-6 lg:grid-cols-[1fr_1.5fr]">
         {profile ? (
           <Suspense fallback={<ResultsAtAGlanceSkeleton />}>
@@ -204,7 +219,13 @@ export default async function Dashboard() {
         ) : (
           <ResultsAtAGlanceSkeleton />
         )}
-        <LearningPaths />
+        {dashboardOption === "assessments" && profile ? (
+          <Suspense fallback={<ScoresByCategorySkeleton />}>
+            <AssessmentHistoryTable profileId={profile.id} />
+          </Suspense>
+        ) : (
+          <LearningPaths />
+        )}
       </div>
 
       {/* Bottom row: Scores, Questionnaire, Webinars */}
@@ -215,6 +236,7 @@ export default async function Dashboard() {
               profileId={profile.id}
               templateId={templateId}
               skillGroups={groups}
+              percentageBasedScoring={percentageBasedScoring}
             />
           </Suspense>
         ) : (

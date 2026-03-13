@@ -10,15 +10,19 @@ import {
 interface SkillGroup {
   id: string;
   name: string;
-  score: number;
+  score: number; // always 0-100 percentage
+  rawScore?: number;
+  maxPossible?: number;
 }
 
 export function ScoresByCategory({
   skillGroups,
   hasResults,
+  percentageBasedScoring = true,
 }: {
   skillGroups: SkillGroup[];
   hasResults: boolean;
+  percentageBasedScoring?: boolean;
 }) {
   return (
     <Card>
@@ -33,16 +37,28 @@ export function ScoresByCategory({
         ) : (
           <Table>
             <TableBody>
-              {skillGroups.map((sg) => (
-                <TableRow key={sg.id}>
-                  <TableCell className="text-sm text-[#004070]">
-                    {sg.name}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Badge variant="outline">{sg.score}%</Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {skillGroups.map((sg) => {
+                const showRaw =
+                  !percentageBasedScoring &&
+                  sg.rawScore != null &&
+                  sg.maxPossible != null;
+                return (
+                  <TableRow key={sg.id}>
+                    <TableCell className="text-sm text-[#004070]">
+                      {sg.name}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {showRaw ? (
+                        <Badge variant="outline">
+                          {sg.rawScore} / {sg.maxPossible} pts
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">{sg.score}%</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CorpDashboardContent } from "@/components/corp-admin/corp-dashboard-content";
 import { InsightsCard } from "@/components/corp-admin/insights-card";
+import { AssessmentHistoryTable } from "@/components/dashboard/assessment-history-table";
 import { CORP_ADMIN_SELECTED_COHORT_COOKIE } from "@/lib/corp-admin-selected-cohort-cookie";
 
 function InsightsSkeleton() {
@@ -56,15 +57,17 @@ export default async function CorpAdminDashboardPage() {
   const { data: cohorts } = corpMembership
     ? await supabase
         .from("cohorts")
-        .select("id, template_id, industry, created_at")
+        .select("id, name, template_id, industry, status, created_at")
         .eq("company_id", corpMembership.corporation_id)
         .eq("admin_id", profile.id)
         .order("created_at", { ascending: false })
     : {
         data: [] as {
           id: string;
+          name: string | null;
           template_id: string | null;
           industry: string | null;
+          status: string | null;
           created_at: string | null;
         }[],
       };
@@ -94,7 +97,7 @@ export default async function CorpAdminDashboardPage() {
     ),
   ];
 
-  const [skillGroupsResult, totalMembersResult, reviewerCountResult, settingsResult, memberUserIdsResult] =
+  const [skillGroupsResult, totalMembersResult, reviewerCountResult, settingsResult, memberUserIdsResult, templateResult] =
     await Promise.all([
       skillGroupIds.length
         ? supabase.from("template_skill_groups").select("id, name").in("id", skillGroupIds).order("name")
@@ -111,6 +114,9 @@ export default async function CorpAdminDashboardPage() {
       cohortId
         ? supabase.from("cohort_members").select("user_id").eq("cohort_id", cohortId).eq("role", "user")
         : Promise.resolve({ data: [] as { user_id: string }[] }),
+      templateId
+        ? supabase.from("assessment_templates").select("title").eq("id", templateId).maybeSingle()
+        : Promise.resolve({ data: null as { title: string } | null }),
     ]);
 
   const skillGroups = skillGroupsResult.data ?? [];
@@ -119,14 +125,26 @@ export default async function CorpAdminDashboardPage() {
   const reviewersEnabled = settingsResult.data?.reviewers_enabled ?? false;
   const memberUserIds = (memberUserIdsResult.data ?? []).map((m) => m.user_id);
   const userCount = memberUserIds.length;
+  const templateTitle = templateResult.data?.title ?? null;
+  const cohortName = activeCohort?.name?.trim() || (activeCohort ? `Cohort ${new Date(activeCohort.created_at!).getFullYear()}` : null);
+  const cohortStatus = activeCohort?.status ?? null;
 
-  const { count: completionCount } = memberUserIds.length
-    ? await supabase
-        .from("assessments")
-        .select("*", { count: "exact", head: true })
-        .in("user_id", memberUserIds)
-        .in("status", ["submitted", "in_review", "reviewed", "completed"])
-    : { count: 0 };
+  const [{ count: completionCount }, { count: reviewedCount }] = await Promise.all([
+    memberUserIds.length
+      ? supabase
+          .from("assessments")
+          .select("*", { count: "exact", head: true })
+          .in("user_id", memberUserIds)
+          .in("status", ["submitted", "in_review", "reviewed", "completed"])
+      : Promise.resolve({ count: 0 }),
+    memberUserIds.length
+      ? supabase
+          .from("assessments")
+          .select("*", { count: "exact", head: true })
+          .in("user_id", memberUserIds)
+          .in("status", ["reviewed", "completed"])
+      : Promise.resolve({ count: 0 }),
+  ]);
 
   // Compute cohort group averages using the same logic as cohort-results route
   const skillGroupsWithScores: { id: string; name: string; score: number }[] = skillGroups.map(
@@ -212,8 +230,20 @@ export default async function CorpAdminDashboardPage() {
 
   const hasResults = skillGroupsWithScores.some((d) => d.score > 0);
 
+  const { data: userSettings } = await supabase
+    .from("user_settings")
+    .select("dashboard_option, percentage_based_scoring")
+    .eq("user_id", profile.id)
+    .maybeSingle();
+  const dashboardOption = userSettings?.dashboard_option ?? "insights";
+  const percentageBasedScoring = userSettings?.percentage_based_scoring ?? true;
+
   const insightsSlot =
-    templateId ? (
+    dashboardOption === "assessments" ? (
+      <Suspense fallback={<InsightsSkeleton />}>
+        <AssessmentHistoryTable profileId={profile.id} />
+      </Suspense>
+    ) : templateId ? (
       <Suspense fallback={<InsightsSkeleton />}>
         <InsightsCard
           skillGroupsWithScores={skillGroupsWithScores}
@@ -235,7 +265,12 @@ export default async function CorpAdminDashboardPage() {
         reviewerCount={reviewerCount}
         userCount={userCount}
         completionCount={completionCount ?? 0}
+        reviewedCount={reviewedCount ?? 0}
+        cohortName={cohortName}
+        cohortStatus={cohortStatus}
+        templateTitle={templateTitle}
         insightsSlot={insightsSlot}
+        percentageBasedScoring={percentageBasedScoring}
       />
     </section>
   );

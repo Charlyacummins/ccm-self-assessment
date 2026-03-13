@@ -29,6 +29,61 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
+function splitLabel(label: string) {
+  const trimmed = label.trim();
+  if (trimmed.length <= 16) return [trimmed];
+  if (trimmed.includes(" / ")) {
+    const [a, b] = trimmed.split(" / ");
+    return [a, b ? `/${b}` : ""].filter(Boolean);
+  }
+  const words = trimmed.split(/\s+/);
+  if (words.length === 1) return [trimmed];
+
+  const lines: string[] = [];
+  let current: string[] = [];
+  let currentLen = 0;
+  const maxLine = 16;
+
+  for (const word of words) {
+    const nextLen = currentLen + (current.length ? 1 : 0) + word.length;
+    if (current.length && nextLen > maxLine) {
+      lines.push(current.join(" "));
+      current = [word];
+      currentLen = word.length;
+    } else {
+      current.push(word);
+      currentLen = nextLen;
+    }
+  }
+
+  if (current.length) lines.push(current.join(" "));
+  return lines;
+}
+
+const AxisTick = ({
+  x,
+  y,
+  payload,
+}: {
+  x?: number;
+  y?: number;
+  payload?: { value?: string };
+}) => {
+  const value = payload?.value ?? "";
+  const lines = splitLabel(value);
+  const dyStart = lines.length > 1 ? 6 : 0;
+
+  return (
+    <text x={x} y={y} textAnchor="middle" fill="#004070" fontSize={11}>
+      {lines.map((line, index) => (
+        <tspan key={line} x={x} dy={index === 0 ? dyStart : 12}>
+          {line}
+        </tspan>
+      ))}
+    </text>
+  );
+};
+
 export function AssessmentFeedback({
   hasResults,
   skillGroups,
@@ -112,34 +167,50 @@ export function AssessmentFeedback({
             </div>
 
             {/* Skill group line chart with benchmark */}
-            <ChartContainer config={chartConfig} className="h-48 w-full">
-              <LineChart data={chartData} accessibilityLayer>
-                <XAxis
-                  dataKey="name"
-                  tickLine={false}
-                  axisLine={false}
-                  fontSize={11}
-                  interval={0}
-                  tick={{ fill: "#004070" }}
-                />
-                <YAxis hide domain={[0, 100]} />
-                <ChartTooltip content={<ChartTooltipContent valueSuffix="%" />} />
-                <Line
-                  type="monotone"
-                  dataKey="you"
-                  stroke="var(--color-you)"
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="benchmark"
-                  stroke="var(--color-benchmark)"
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                />
-              </LineChart>
-            </ChartContainer>
+            <div className="-mx-3 overflow-x-auto px-3">
+              <div
+                style={{
+                  minWidth: `${Math.max(100, (chartData.length / 4) * 100)}%`,
+                }}
+              >
+                <ChartContainer config={chartConfig} className="h-48 w-full">
+                  <LineChart
+                    data={chartData}
+                    accessibilityLayer
+                    margin={{ left: 16, right: 16 }}
+                  >
+                    <XAxis
+                      dataKey="name"
+                      tickLine={false}
+                      axisLine={false}
+                      interval={0}
+                      tickMargin={16}
+                      height={60}
+                      padding={{ left: 28, right: 28 }}
+                      tick={<AxisTick />}
+                    />
+                    <YAxis hide domain={[0, 100]} />
+                    <ChartTooltip
+                      content={<ChartTooltipContent valueSuffix="%" />}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="you"
+                      stroke="var(--color-you)"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="benchmark"
+                      stroke="var(--color-benchmark)"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                  </LineChart>
+                </ChartContainer>
+              </div>
+            </div>
           </div>
         )}
       </CardContent>

@@ -172,6 +172,7 @@ function ExpandedContent({
   onStatusAction,
   statusActionLoading,
   statusActionError,
+  cohortStatus,
 }: {
   template: string;
   onTemplateChange: (v: string) => void;
@@ -191,8 +192,10 @@ function ExpandedContent({
   onStatusAction: () => void;
   statusActionLoading: boolean;
   statusActionError: string | null;
+  cohortStatus: CohortLifecycleStatus | null;
 }) {
   const reviewersEnabled = overview?.reviewersEnabled ?? false;
+  const questionsLocked = cohortStatus === "Active" || cohortStatus === "Completed";
 
   return (
     <div className="space-y-6">
@@ -237,16 +240,18 @@ function ExpandedContent({
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-medium text-[#534F4F]">Custom Questions</p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onOpenAddCustomQuestion}
-            className="h-7 border-[#00ABEB] px-2 text-xs text-[#004070]"
-          >
-            <Plus className="mr-1 h-3.5 w-3.5" />
-            Add Custom Question
-          </Button>
+          {!questionsLocked && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onOpenAddCustomQuestion}
+              className="h-7 border-[#00ABEB] px-2 text-xs text-[#004070]"
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Add Custom Question
+            </Button>
+          )}
         </div>
           <div className="rounded-md border">
             <ol className="divide-y">
@@ -816,13 +821,14 @@ export function AssessmentTemplatesPanel({
   };
 
   const currentStatus = overview ? normalizeCohortStatus(overview.status) : null;
+  const questionsLocked = currentStatus === "Active" || currentStatus === "Completed";
   const statusActionLabel =
     !selectedCohortId || overviewLoading || !currentStatus
       ? null
       : currentStatus === "Draft"
         ? "Make Active"
         : currentStatus === "Active"
-          ? "End Cohort Test"
+          ? "End Testing"
           : null;
 
   const groupedQuestions = (questionSet?.questions ?? []).reduce<
@@ -893,16 +899,18 @@ export function AssessmentTemplatesPanel({
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs font-medium text-[#534F4F]">Custom Questions</p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleOpenAddCustomQuestion}
-                className="h-7 border-[#00ABEB] px-2 text-xs text-[#004070]"
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" />
-                Add Custom Question
-              </Button>
+              {!questionsLocked && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOpenAddCustomQuestion}
+                  className="h-7 border-[#00ABEB] px-2 text-xs text-[#004070]"
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Add Custom Question
+                </Button>
+              )}
             </div>
             <div className="rounded-md border">
               <ol className="divide-y">
@@ -1013,6 +1021,7 @@ export function AssessmentTemplatesPanel({
             }
             statusActionLoading={cohortStatusSaving}
             statusActionError={cohortStatusError}
+            cohortStatus={currentStatus}
           />
         </DialogContent>
       </Dialog>
@@ -1091,17 +1100,18 @@ export function AssessmentTemplatesPanel({
                             <div className="text-sm font-medium text-[#004070]">
                               {index + 1}. {q.name}
                             </div>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => void handleRemoveExistingQuestion(q.id)}
-                              disabled={questionRemovingId === q.id}
-                              className="h-7 px-2 text-red-600 hover:text-red-700"
-                            >
-                              <Trash2 className="mr-1 h-3.5 w-3.5" />
-               
-                            </Button>
+                            {!questionsLocked && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => void handleRemoveExistingQuestion(q.id)}
+                                disabled={questionRemovingId === q.id}
+                                className="h-7 px-2 text-red-600 hover:text-red-700"
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                              </Button>
+                            )}
                           </div>
                           {q.description ? (
                             <p className="mt-1 text-xs text-muted-foreground">{q.description}</p>

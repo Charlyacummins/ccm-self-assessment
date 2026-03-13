@@ -49,7 +49,7 @@ export async function GET(req: Request) {
     .from("cohort_members")
     .select("user_id, group_id, reviewer_id")
     .eq("cohort_id", cohortId)
-    .eq("role", role);
+    .or(`role.eq.${role},and(also_participant.eq.true,participant_type.eq.${role})`);
   if (membersError) return NextResponse.json({ error: membersError.message }, { status: 500 });
 
   if (!members || members.length === 0) return NextResponse.json([]);

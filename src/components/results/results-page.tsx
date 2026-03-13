@@ -19,6 +19,8 @@ interface ResultsPageProps {
   skillGroupResults: SkillGroupResult[];
   skillScores: SkillScore[];
   feedbackText: string;
+  percentageBasedScoring?: boolean;
+  initialFilters?: Record<string, string>;
 }
 
 export function ResultsPage({
@@ -27,8 +29,10 @@ export function ResultsPage({
   skillGroupResults,
   skillScores,
   feedbackText,
+  percentageBasedScoring = true,
+  initialFilters,
 }: ResultsPageProps) {
-  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [filters, setFilters] = useState<Record<string, string>>(initialFilters ?? {});
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   const { data: benchmarks, isLoading: benchmarksLoading } = useBenchmarks({
@@ -57,11 +61,13 @@ export function ResultsPage({
         filters={filters}
         onSelectGroup={(groupId) => setSelectedGroupId(groupId)}
         benchmarks={benchmarks}
+        percentageBasedScoring={percentageBasedScoring}
       />
 
       <BenchmarkOptions
         onApply={setFilters}
         showDateRange
+        initialValues={initialFilters}
       />
 
       <AssessmentFeedback

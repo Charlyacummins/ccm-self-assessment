@@ -380,3 +380,261 @@ $$;
 
 - Applied to staging only (not yet in `main`)
 - Both v2 RPCs benchmark against default-template facts and map overlap via `template_skills.meta_json.template_ids`
+
+## 2026-03-09
+
+### Added `public.v_benchmark_skill_facts_v2` (materialized view)
+
+Replaces `v_benchmark_skill_facts_live` for corp admin and individual user benchmark RPCs. Indexed on `skill_group_id` and `template_skill_id` — no `template_id` column, so captures scores from all templates via skill UUID.
+
+```sql
+create materialized view public.v_benchmark_skill_facts_v2 as
+select
+  ass.template_skill_id,
+  ts.skill_group_id,
+  coalesce(ass.reviewer_score, ass.final_score, ass.points)::numeric as score_value,
+  a.submitted_at,
+  ud.country,
+  ud.industry,
+  ud.seniority_level    as job_level,
+  ud.functional_area,
+  ud.job_role           as role,
+  ud.region,
+  ud.sub_region,
+  ud.years_experience,
+  ud.education_level
+from public.assessment_skill_scores ass
+join public.assessments a         on a.id  = ass.assessment_id
+join public.template_skills ts    on ts.id = ass.template_skill_id
+left join public.user_dimensions ud on ud.user_id = a.user_id
+where a.submitted_at is not null
+  and coalesce(ass.reviewer_score, ass.final_score, ass.points) is not null;
+
+create index on public.v_benchmark_skill_facts_v2 (skill_group_id);
+create index on public.v_benchmark_skill_facts_v2 (template_skill_id);
+```
+
+### Updated `public.rpc_skill_group_benchmark_v2(...)`
+
+Replaced single `p_skill_group_id` + `p_cohort_template_id` signature with batched `p_skill_group_ids uuid[]`. Now uses `v_benchmark_skill_facts_v2` (no template_id filter). Returns one row per skill group.
+
+```sql
+create or replace function public.rpc_skill_group_benchmark_v2(
+  p_skill_group_ids uuid[],
+  p_submitted_year integer default null,
+  p_country text default null,
+  p_industry text default null,
+  p_job_level text default null,
+  p_functional_area text default null,
+  p_role text default null,
+  p_region text default null,
+  p_sub_region text default null,
+  p_years_experience integer default null,
+  p_education_level text default null
+)
+returns table(
+  skill_group_id uuid,
+  skill_group_name text,
+  total_possible_points bigint,
+  n bigint,
+  mean_score numeric
+)
+language sql stable security definer as $$
+with matched_skills as (
+  select ts.id as template_skill_id, ts.skill_group_id, ts.max_points::numeric
+  from public.template_skills ts
+  where ts.skill_group_id = any(p_skill_group_ids)
+),
+skill_stats as (
+  select
+    f.template_skill_id,
+    count(*)                    as n,
+    avg(f.score_value)          as mean_score
+  from public.v_benchmark_skill_facts_v2 f
+  join matched_skills ms on ms.template_skill_id = f.template_skill_id
+  where (p_submitted_year   is null or extract(year from f.submitted_at)::int = p_submitted_year)
+    and (p_country          is null or f.country          = p_country)
+    and (p_industry         is null or f.industry         = p_industry)
+    and (p_job_level        is null or f.job_level        = p_job_level)
+    and (p_functional_area  is null or f.functional_area  = p_functional_area)
+    and (p_role             is null or f.role             = p_role)
+    and (p_region           is null or f.region           = p_region)
+    and (p_sub_region       is null or f.sub_region       = p_sub_region)
+    and (p_years_experience is null or f.years_experience = p_years_experience)
+    and (p_education_level  is null or f.education_level  = p_education_level)
+  group by f.template_skill_id
+)
+select
+  ms.skill_group_id,
+  tsg.name                                                            as skill_group_name,
+  sum(ms.max_points)::bigint                                          as total_possible_points,
+  min(ss.n)::bigint                                                   as n,
+  sum(ss.mean_score)                                                  as mean_score
+from skill_stats ss
+join matched_skills ms on ms.template_skill_id = ss.template_skill_id
+join public.template_skill_groups tsg on tsg.id = ms.skill_group_id
+group by ms.skill_group_id, tsg.name;
+$$;
+```
+
+### Updated `public.rpc_dynamic_skill_benchmark_live_v2(...)`
+
+Now uses `v_benchmark_skill_facts_v2` instead of `v_benchmark_skill_facts_live`. No `p_template_id` — queries by `template_skill_id` directly across all templates.
+
+```sql
+create or replace function public.rpc_dynamic_skill_benchmark_live_v2(
+  p_template_skill_id uuid,
+  p_submitted_year integer default null,
+  p_country text default null,
+  p_industry text default null,
+  p_job_level text default null,
+  p_functional_area text default null,
+  p_role text default null,
+  p_region text default null,
+  p_sub_region text default null,
+  p_years_experience integer default null,
+  p_education_level text default null
+)
+returns table(
+  n bigint,
+  mean_score numeric,
+  p10 numeric, p25 numeric, p50 numeric, p75 numeric, p90 numeric
+)
+language sql stable security definer as $$
+with base as (
+  select f.score_value
+  from public.v_benchmark_skill_facts_v2 f
+  where f.template_skill_id = p_template_skill_id
+    and (p_submitted_year   is null or extract(year from f.submitted_at)::int = p_submitted_year)
+    and (p_country          is null or f.country          = p_country)
+    and (p_industry         is null or f.industry         = p_industry)
+    and (p_job_level        is null or f.job_level        = p_job_level)
+    and (p_functional_area  is null or f.functional_area  = p_functional_area)
+    and (p_role             is null or f.role             = p_role)
+    and (p_region           is null or f.region           = p_region)
+    and (p_sub_region       is null or f.sub_region       = p_sub_region)
+    and (p_years_experience is null or f.years_experience = p_years_experience)
+    and (p_education_level  is null or f.education_level  = p_education_level)
+)
+select
+  count(*)::bigint                                          as n,
+  avg(score_value)                                         as mean_score,
+  percentile_cont(0.10) within group (order by score_value) as p10,
+  percentile_cont(0.25) within group (order by score_value) as p25,
+  percentile_cont(0.50) within group (order by score_value) as p50,
+  percentile_cont(0.75) within group (order by score_value) as p75,
+  percentile_cont(0.90) within group (order by score_value) as p90
+from base;
+$$;
+```
+
+### Notes
+
+- Applied to staging only (not yet in `main`)
+- `v_benchmark_skill_facts_v2` captures scores from all templates (no `template_id` filter) — fixes cross-template benchmark accuracy
+- `rpc_skill_group_benchmark_v2` now batched (accepts array of IDs) — reduces N API calls to 1
+- Both individual user routes (`/api/assessment/benchmark`, `/api/assessment/skill-benchmark`) updated to use v2 RPCs
+- Corp admin routes already used v2 RPCs; `p_cohort_template_id` param removed from group benchmark
+
+## 2026-03-10
+
+### Added `country_id` column to `public.user_settings`
+
+```sql
+alter table public.user_settings
+add column country_id integer null;
+
+alter table public.user_settings
+add constraint user_settings_country_id_fkey
+foreign key (country_id)
+references public.countries (country_id)
+on update cascade
+on delete set null;
+```
+
+### Notes
+
+- Applied to staging only (not yet in `main`)
+- `country_id` stores the user's selected benchmark country when `benchmark_default = 'country'`
+- FK references `countries.country_id` (integer PK); `on delete set null` so removing a country row doesn't orphan user settings
+
+## 2026-03-11
+
+### Added composite index on `public.v_benchmark_skill_facts_v2`
+
+Fixes statement timeout on `rpc_skill_group_benchmark_v2` by allowing index-only scans on the join between the materialized view and `matched_skills`.
+
+```sql
+create index if not exists v_benchmark_skill_facts_v2_skill_group_template_idx
+  on public.v_benchmark_skill_facts_v2 (skill_group_id, template_skill_id);
+```
+
+### Notes
+
+- Applied to staging only (not yet in `main`)
+- Previous single-column indexes on `skill_group_id` and `template_skill_id` were insufficient for the batched RPC join pattern
+- If timeouts persist after indexing, also apply `set statement_timeout = '30s'` to `rpc_skill_group_benchmark_v2` (see benchmark route fix notes in 2026-03-09 entry)
+
+### Added `also_participant` and `participant_type` columns to `public.cohort_members`
+
+Supports multi-role users — e.g. a corp_admin who also participates in their own cohort as a user or reviewer. The `role` column is preserved (stays `corp_admin`); participation is tracked separately.
+
+```sql
+alter table public.cohort_members
+add column also_participant boolean not null default false,
+add column participant_type text null
+  check (participant_type in ('user', 'reviewer'));
+```
+
+### Notes
+
+- Applied to staging only (not yet in `main`)
+- `also_participant = true` + `participant_type` is set when a high-privilege user (corp_admin) is added to a cohort as a user/reviewer, instead of overwriting their `role`
+- Used by `getUserRoles()` to detect multi-role contexts and present the role selector UI
+
+### Updated `public.refresh_cohort_seats_used(uuid)`
+
+Fixes seat counting for multi-role users. Previously excluded only `corp_admin` rows; now also excludes `reviewer` rows unless `participant_type = 'user'` (i.e. the reviewer was explicitly invited as a cohort participant).
+
+```sql
+CREATE OR REPLACE FUNCTION public.refresh_cohort_seats_used(p_cohort_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  update public.cohorts c
+  set seats_used = (
+    select count(*)
+    from public.cohort_members cm
+    where cm.cohort_id = p_cohort_id
+      and not (
+        cm.role in ('corp_admin', 'reviewer')
+        and cm.participant_type is distinct from 'user'
+      )
+  )
+  where c.id = p_cohort_id;
+end;
+$function$
+```
+
+### Notes
+
+- Applied to staging only (not yet in `main`)
+- A `corp_admin` or `reviewer` row is now counted toward seats only when `participant_type = 'user'`
+
+### Added `location` column to `public.cohorts`
+
+Allows corp admins to record a location for each cohort (e.g. city/country of the group being assessed).
+
+```sql
+alter table public.cohorts
+add column location text null;
+```
+
+### Notes
+
+- Applied to staging only (not yet in `main`)
+- Free-text field, no FK constraint — e.g. "New York, USA"
+- Editable via the corp admin Account page (scoped to the active cohort)

@@ -15,6 +15,58 @@ interface AdminProvisionPayload {
   };
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function sendProvisionedAdminEmail(params: {
+  email: string;
+  fullName: string;
+  corporationName: string;
+}) {
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) return;
+
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    "https://ccm-self-assessment-staging.vercel.app";
+  const loginUrl = `${appUrl.replace(/\/$/, "")}/login`;
+  const safeName = escapeHtml(params.fullName || "there");
+  const safeCorp = escapeHtml(params.corporationName);
+
+  const html = `
+    <p>Hi ${safeName},</p>
+    <p>Your admin access for <strong>${safeCorp}</strong> has been provisioned.</p>
+    <p>Please sign in with this email address to access your dashboard:</p>
+    <p><a href="${loginUrl}">${loginUrl}</a></p>
+    <p>If you did not expect this, please contact support.</p>
+  `;
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: "onboarding@resend.dev",
+      to: params.email,
+      subject: "Your CCM admin access is ready",
+      html,
+    }),
+  });
+
+  if (!res.ok) {
+    console.error("[provision-admin] Resend error", await res.text());
+  }
+}
+
 function verifyWebhookSignature(payload: string, signature: string | null): boolean {
   if (!signature || !process.env.PROVISION_WEBHOOK_SECRET) {
     return false;
@@ -136,6 +188,7 @@ export async function POST(req: Request) {
     });
 
     let clerkUserId: string;
+    let createdNewClerkUser = false;
 
     if (usersResponse.data.length > 0) {
       clerkUserId = usersResponse.data[0].id;
@@ -156,6 +209,7 @@ export async function POST(req: Request) {
       });
 
       clerkUserId = user.id;
+      createdNewClerkUser = true;
     }
 
     // 6. Add user to Clerk organization with corp_admin role
@@ -344,6 +398,15 @@ export async function POST(req: Request) {
       processed: true,
       processed_at: new Date().toISOString(),
     });
+
+    // Send a first-login email only when a new Clerk user is created.
+    if (createdNewClerkUser) {
+      await sendProvisionedAdminEmail({
+        email: admin_user.email,
+        fullName: admin_user.full_name,
+        corporationName: corporation_name,
+      });
+    }
 
     return NextResponse.json({
       ok: true,

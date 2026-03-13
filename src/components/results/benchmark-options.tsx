@@ -27,6 +27,7 @@ interface BenchmarkOptionsProps {
   extraDemographics?: DemographicDef[];
   showDateRange?: boolean;
   onDateRangeChange?: (start: string, end: string) => void;
+  initialValues?: Record<string, string>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,12 +68,15 @@ export function BenchmarkOptions({
   extraDemographics,
   showDateRange,
   onDateRangeChange,
+  initialValues,
 }: BenchmarkOptionsProps) {
-  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [filters, setFilters] = useState<Record<string, string>>(initialValues ?? {});
   const [options, setOptions] = useState<FilterOptions>({});
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
-  const [appliedFilters, setAppliedFilters] = useState<Record<string, string> | null>(null);
+  const [appliedFilters, setAppliedFilters] = useState<Record<string, string> | null>(
+    initialValues && Object.keys(initialValues).length > 0 ? initialValues : null
+  );
 
   useEffect(() => {
     fetch("/api/assessment/filter-options")

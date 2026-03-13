@@ -64,7 +64,24 @@ export default async function ReviewerDashboardPage() {
     .in("status", ["submitted", "in_review", "reviewed", "completed"])
     .order("submitted_at", { ascending: false, nullsFirst: false });
 
-  const inviteeIds = [...new Set((assessments ?? []).map((a) => a.user_id))];
+  // Also fetch all users assigned to this reviewer (including those who haven't submitted yet)
+  const { data: assignedMembers } = await supabase
+    .from("cohort_members")
+    .select("user_id")
+    .eq("reviewer_id", reviewerProfile.id)
+    .eq("role", "user");
+
+  const assignedUserIds = new Set((assignedMembers ?? []).map((m) => m.user_id));
+  const assessmentUserIds = new Set((assessments ?? []).map((a) => a.user_id));
+
+  // Users assigned but with no qualifying assessment yet
+  const pendingUserIds = [...assignedUserIds].filter((id) => !assessmentUserIds.has(id));
+
+  const inviteeIds = [...new Set([
+    ...(assessments ?? []).map((a) => a.user_id),
+    ...pendingUserIds,
+  ])];
+
   const { data: inviteeProfiles } = inviteeIds.length
     ? await supabase
         .from("profiles")
@@ -82,7 +99,7 @@ export default async function ReviewerDashboardPage() {
   const profileById = new Map((inviteeProfiles ?? []).map((p) => [p.id, p]));
   const functionById = new Map((inviteeDimensions ?? []).map((d) => [d.user_id, d.functional_area]));
 
-  const pendingCount = (assessments ?? []).filter((a) => ["submitted", "in_review"].includes(a.status)).length;
+  const pendingCount = (assessments ?? []).filter((a) => ["submitted", "in_review"].includes(a.status)).length + pendingUserIds.length;
   const completedCount = (assessments ?? []).filter((a) => ["reviewed", "completed"].includes(a.status)).length;
 
   const sevenDaysAgo = new Date();
@@ -115,18 +132,31 @@ export default async function ReviewerDashboardPage() {
   const estHigh = Math.max(1, Math.ceil(questions * 0.75));
   const timeLabel = estLow === estHigh ? `~${estLow} mins` : `${estLow}-${estHigh} mins`;
 
-  const reviewRows: ReviewRow[] = (assessments ?? []).slice(0, 10).map((assessment) => {
-    const p = profileById.get(assessment.user_id);
-    const mapped = mapReviewStatus(assessment.status);
-    return {
-      id: assessment.id,
-      invitee: p?.full_name || "Unknown Invitee",
-      email: p?.email || "-",
-      statusLabel: mapped.label,
-      functionLabel: functionById.get(assessment.user_id) || "-",
-      actionLabel: mapped.action,
-    };
-  });
+  const reviewRows: ReviewRow[] = [
+    ...(assessments ?? []).map((assessment) => {
+      const p = profileById.get(assessment.user_id);
+      const mapped = mapReviewStatus(assessment.status);
+      return {
+        id: assessment.id,
+        invitee: p?.full_name || "Unknown Invitee",
+        email: p?.email || "-",
+        statusLabel: mapped.label,
+        functionLabel: functionById.get(assessment.user_id) || "-",
+        actionLabel: mapped.action,
+      };
+    }),
+    ...pendingUserIds.map((uid) => {
+      const p = profileById.get(uid);
+      return {
+        id: `pending-${uid}`,
+        invitee: p?.full_name || "Unknown Invitee",
+        email: p?.email || "-",
+        statusLabel: "Test in Progress",
+        functionLabel: functionById.get(uid) || "-",
+        actionLabel: "",
+      };
+    }),
+  ];
 
   const orgDisplayName = "YOUR ASSIGNED INVITEES";
   const overviewCards = [
@@ -218,12 +248,16 @@ export default async function ReviewerDashboardPage() {
                     <TableCell className="font-semibold text-[#004070]">{row.statusLabel}</TableCell>
                     <TableCell>{row.functionLabel}</TableCell>
                     <TableCell>
-                      <Link
-                        href={`/reviewer/submissions/${row.id}`}
-                        className="font-medium text-[#00ABEB] hover:text-[#004070]"
-                      >
-                        {row.actionLabel}
-                      </Link>
+                      {row.actionLabel ? (
+                        <Link
+                          href={`/reviewer/submissions/${row.id}`}
+                          className="font-medium text-[#00ABEB] hover:text-[#004070]"
+                        >
+                          {row.actionLabel}
+                        </Link>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
